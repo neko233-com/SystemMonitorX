@@ -1,0 +1,92 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust 1.96.0
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10-11
+        with:
+          toolchain: 1.96.0
+          components: rustfmt, clippy
+          targets: x86_64-pc-windows-msvc
+      - name: Install WiX 7
+        run: |
+          $taskWixPath = Join-Path $env:RUNNER_TEMP 'wix7'
+          dotnet tool install --tool-path $taskWixPath wix --version 7.0.0
+          if ($LASTEXITCODE -ne 0) { throw 'WiX installation failed.' }
+          $taskWixPath | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Check formatting, Clippy, tests and real Windows telemetry
+        run: ./scripts/Verify.ps1
+      - name: Build and validate MSI and portable ZIP
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $taskTagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+            $taskCargoVersion = (Select-String -LiteralPath Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+            if ($taskTagVersion -ne $taskCargoVersion) { throw "Tag version $taskTagVersion does not match Cargo.toml version $taskCargoVersion." }
+            ./scripts/Package.ps1 -SkipBuild -Version $taskTagVersion
+          } else {
+            ./scripts/Package.ps1 -SkipBuild
+          }
+      - name: Upload verified Windows packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64-packages
+          path: |
+            dist/*.msi
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified Windows packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-x64-packages
+          path: dist
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $taskAssets = @(Get-ChildItem -LiteralPath dist -File | ForEach-Object FullName)
+          if ($taskAssets.Count -ne 3) { throw 'Expected MSI, portable ZIP and SHA256SUMS.txt.' }
+          gh release view $env:RELEASE_TAG --repo $env:GH_REPO *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @taskAssets --repo $env:GH_REPO --clobber
+          } else {
+            gh release create $env:RELEASE_TAG @taskAssets --repo $env:GH_REPO --verify-tag --title "SystemMonitorX $env:RELEASE_TAG" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

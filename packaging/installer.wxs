@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="SystemMonitorX" Manufacturer="neko233-com"
+           Version="$(var.Version)" Language="1033" Scope="perUser"
+           UpgradeCode="{9D4A61F2-384D-4FA8-901A-340E906D97E8}">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of SystemMonitorX is already installed."
+                  Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Icon Id="AppIcon" SourceFile="$(var.SourceRoot)/assets/app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/neko233-com/SystemMonitorX" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/neko233-com/SystemMonitorX/issues" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="SystemMonitorX">
+          <Component Id="ApplicationFiles" Guid="{BB637B20-E6A6-4E9B-941B-5FB70916C4D8}">
+            <File Id="MainExecutable" Source="$(var.PayloadDir)/SystemMonitorX.exe" />
+            <File Id="LicenseFile" Source="$(var.PayloadDir)/LICENSE" />
+            <File Id="ReadmeFile" Source="$(var.PayloadDir)/README.md" />
+            <Shortcut Id="LaunchShortcut" Directory="ApplicationMenuFolder" Name="SystemMonitorX"
+                      Description="Windows system monitor and task manager"
+                      Target="[#MainExecutable]" WorkingDirectory="INSTALLFOLDER"
+                      Icon="AppIcon" IconIndex="0" />
+            <RegistryValue Root="HKCU" Key="Software\neko233-com\SystemMonitorX"
+                           Name="ApplicationFiles" Type="integer" Value="1" KeyPath="yes" />
+            <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+            <RemoveFolder Id="RemoveUserProgramsFolder" Directory="UserProgramsFolder" On="uninstall" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationMenuFolder" Name="SystemMonitorX">
+        <Component Id="StartMenuShortcuts" Guid="*">
+          <Shortcut Id="UninstallShortcut" Name="Uninstall SystemMonitorX"
+                    Target="[System64Folder]msiexec.exe" Arguments="/x [ProductCode]"
+                    WorkingDirectory="System64Folder" />
+          <RemoveFolder Id="RemoveMenuFolder" Directory="ApplicationMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\neko233-com\SystemMonitorX"
+                         Name="StartMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="SystemMonitorX" Level="1">
+      <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="StartMenuShortcuts" />
+      <?ifdef IncludeRuntime ?>
+      <ComponentGroupRef Id="RuntimeFiles" />
+      <?endif ?>
+    </Feature>
+  </Package>
+</Wix>
