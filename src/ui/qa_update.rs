@@ -39,12 +39,12 @@ fn click_control(
             }
             ensure!(
                 window
-                    .try_find("settings-scroll")
+                    .try_find("app-root")
                     .is_some_and(|target| target.visible()),
-                "settings scroll surface is missing"
+                "application scroll target is missing"
             );
             window.scroll(
-                "settings-scroll",
+                "app-root",
                 ScrollDelta::Pixels(point(px(0.), px(-160.))),
                 cx,
             );

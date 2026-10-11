@@ -15,7 +15,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::windows::{fs::OpenOptionsExt, io::AsRawHandle, process::CommandExt},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf, Prefix},
     process::{Child, Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -317,6 +317,11 @@ pub fn prepare_and_launch(msi: &Path, release: &ReleaseInfo) -> Result<()> {
         directory.parent() == Some(root.as_path()),
         "安装助手缓存目录无效"
     );
+    let log_path = directory.join(LOG_NAME);
+    validate_installer_boundary(&installer, &log_path, &directory)?;
+    // Reject paths that msiexec cannot represent before spawning/acknowledging
+    // a helper, so a preparation error keeps the current GUI open.
+    let _ = installer_command(&system_msiexec()?, &installer, &log_path, &directory)?;
     let helper = copy_bundled_helper(app_directory, &directory)?;
     let job = UpdateJob {
         format_version: JOB_VERSION,
@@ -330,7 +335,7 @@ pub fn prepare_and_launch(msi: &Path, release: &ReleaseInfo) -> Result<()> {
         helper_executable: helper.clone(),
         result_path: directory.join(RESULT_NAME),
         last_result_path: root.join(LAST_RESULT_NAME),
-        log_path: directory.join(LOG_NAME),
+        log_path,
     };
     let path = directory.join(JOB_NAME);
     let mut file = OpenOptions::new()
@@ -506,10 +511,106 @@ fn system_msiexec() -> Result<PathBuf> {
         .context("Windows Installer 系统路径无效")
 }
 
-fn installer_command(msiexec: &Path, installer: &Path, log: &Path, directory: &Path) -> Command {
+/// Windows Installer's source-directory handling expects standard DOS/UNC
+/// paths. Keep canonical verbatim paths for validation and file guards, and
+/// translate only at this process boundary without lossy string replacement.
+/// https://doc.rust-lang.org/std/path/enum.Prefix.html
+/// https://learn.microsoft.com/windows/win32/fileio/naming-a-file
+fn windows_installer_path(path: &Path) -> Result<PathBuf> {
+    use std::os::windows::ffi::OsStrExt;
+    ensure!(
+        path.is_absolute(),
+        "Windows Installer 路径必须是绝对 DOS/UNC 路径"
+    );
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        bail!("Windows Installer 路径缺少 DOS/UNC 前缀");
+    };
+    let mut normal = match prefix.kind() {
+        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+            PathBuf::from(format!("{}:\\", char::from(drive)))
+        }
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+            ensure!(
+                !server.is_empty() && !share.is_empty(),
+                "Windows Installer UNC 服务器/共享名为空"
+            );
+            let mut value = OsString::from(r"\\");
+            value.push(server);
+            value.push(r"\");
+            value.push(share);
+            value.push(r"\");
+            PathBuf::from(value)
+        }
+        Prefix::DeviceNS(_) | Prefix::Verbatim(_) => {
+            bail!("Windows Installer 不支持设备或原始命名空间路径");
+        }
+    };
+    for component in components {
+        match component {
+            Component::RootDir => {}
+            Component::Normal(name) => {
+                let units: Vec<_> = name.encode_wide().collect();
+                ensure!(
+                    !units.is_empty()
+                        && !matches!(units.last(), Some(32 | 46))
+                        && !units.iter().any(|unit| {
+                            *unit < 32
+                                || matches!(*unit, 34 | 42 | 47 | 58 | 60 | 62 | 63 | 92 | 124)
+                        }),
+                    "Windows Installer 路径包含不能安全转换到 DOS/UNC 的文件名"
+                );
+                normal.push(name);
+            }
+            Component::CurDir | Component::ParentDir | Component::Prefix(_) => {
+                bail!("Windows Installer 路径不能包含相对目录或嵌套前缀");
+            }
+        }
+    }
+    let units: Vec<_> = normal.as_os_str().encode_wide().collect();
+    ensure!(
+        !units.contains(&0) && units.len() < 260,
+        "Windows Installer 路径超过 259 个 UTF-16 单元或包含空字符；请使用较短的用户缓存路径"
+    );
+    Ok(normal)
+}
+
+fn validate_installer_boundary(installer: &Path, log: &Path, directory: &Path) -> Result<()> {
+    let normal_installer =
+        windows_installer_path(installer).context("安装包路径无法交给 Windows Installer")?;
+    let normal_log = windows_installer_path(log).context("日志路径无法交给 Windows Installer")?;
+    let normal_directory =
+        windows_installer_path(directory).context("缓存目录无法交给 Windows Installer")?;
+    ensure!(
+        normal_installer.canonicalize()? == installer.canonicalize()?,
+        "DOS/UNC 安装包路径与已校验文件不一致"
+    );
+    let canonical_directory = directory.canonicalize()?;
+    ensure!(
+        normal_directory.canonicalize()? == canonical_directory
+            && normal_log
+                .parent()
+                .context("安装日志目录无效")?
+                .canonicalize()?
+                == canonical_directory,
+        "DOS/UNC 缓存/日志目录与已校验目录不一致"
+    );
+    Ok(())
+}
+
+fn installer_command(
+    msiexec: &Path,
+    installer: &Path,
+    log: &Path,
+    directory: &Path,
+) -> Result<Command> {
     // Each argument is passed to CreateProcess by std::process::Command;
     // there is no shell interpolation or handwritten Windows quoting.
-    let mut command = Command::new(msiexec);
+    let executable = windows_installer_path(msiexec).context("Windows Installer 程序路径无效")?;
+    let installer = windows_installer_path(installer)?;
+    let log = windows_installer_path(log)?;
+    let directory = windows_installer_path(directory)?;
+    let mut command = Command::new(executable);
     command
         .arg("/i")
         .arg(installer)
@@ -522,7 +623,7 @@ fn installer_command(msiexec: &Path, installer: &Path, log: &Path, directory: &P
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    command
+    Ok(command)
 }
 
 fn classify_exit_code(code: u32) -> (InstallStatus, String) {
@@ -716,6 +817,15 @@ pub fn run_job(path: &Path) -> Result<()> {
             .open(job.job_directory.join("install.started"))
             .context("此安装任务已启动，不能重复执行")?;
         let installer_guard = open_verified_installer(&job)?;
+        // Repeat the boundary check while the exact verified MSI is guarded,
+        // before publishing Ready and allowing the old GUI to exit.
+        validate_installer_boundary(&job.installer_path, &job.log_path, &job.job_directory)?;
+        let _ = installer_command(
+            &system_msiexec()?,
+            &job.installer_path,
+            &job.log_path,
+            &job.job_directory,
+        )?;
         atomic_json(
             &job.job_directory.join(READY_NAME),
             &HelperReady {
@@ -752,7 +862,7 @@ pub fn run_job(path: &Path) -> Result<()> {
                     &job.installer_path,
                     &job.log_path,
                     &job.job_directory,
-                )
+                )?
                 .status()
                 .context("无法启动或等待 Windows Installer")?;
                 status
@@ -947,7 +1057,8 @@ mod tests {
             installer,
             log,
             Path::new("C:\\User Files\\helper cache"),
-        );
+        )
+        .unwrap();
         assert_eq!(command.get_program(), executable.as_os_str());
         let args: Vec<_> = command
             .get_args()
@@ -957,6 +1068,95 @@ mod tests {
         assert_eq!(args[5], log.as_os_str());
         assert_eq!(args.len(), 7);
         assert_eq!(args[6], "MSIRESTARTMANAGERCONTROL=Disable");
+    }
+
+    #[test]
+    fn installer_boundary_converts_verbatim_dos_paths_without_losing_argument_identity() {
+        let command = installer_command(
+            Path::new(r"\\?\C:\Windows\System32\msiexec.exe"),
+            Path::new(r"\\?\C:\User Files\甲 & 乙\SystemMonitorX-1.2.3-x64.msi"),
+            Path::new(r"\\?\C:\User Files\helper cache\install.log"),
+            Path::new(r"\\?\C:\User Files\helper cache"),
+        )
+        .unwrap();
+        assert_eq!(
+            command.get_program(),
+            Path::new(r"C:\Windows\System32\msiexec.exe")
+        );
+        let arguments: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            arguments[1],
+            Path::new(r"C:\User Files\甲 & 乙\SystemMonitorX-1.2.3-x64.msi")
+        );
+        assert_eq!(
+            arguments[5],
+            Path::new(r"C:\User Files\helper cache\install.log")
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new(r"C:\User Files\helper cache"))
+        );
+        assert_eq!(
+            windows_installer_path(Path::new(r"C:\User Files\甲 & 乙\app.msi")).unwrap(),
+            Path::new(r"C:\User Files\甲 & 乙\app.msi")
+        );
+    }
+
+    #[test]
+    fn installer_boundary_preserves_unc_server_share_and_unicode_spaces() {
+        let expected = Path::new(r"\\file server\Shared Files\更新目录\app.msi");
+        assert_eq!(
+            windows_installer_path(Path::new(
+                r"\\?\UNC\file server\Shared Files\更新目录\app.msi"
+            ))
+            .unwrap(),
+            expected
+        );
+        assert_eq!(windows_installer_path(expected).unwrap(), expected);
+        let command = installer_command(
+            Path::new(r"C:\Windows\System32\msiexec.exe"),
+            Path::new(r"\\?\UNC\server\share\update cache\app.msi"),
+            Path::new(r"\\?\UNC\server\share\update cache\install.log"),
+            Path::new(r"\\?\UNC\server\share\update cache"),
+        )
+        .unwrap();
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new(r"\\server\share\update cache"))
+        );
+        assert_eq!(
+            command.get_args().nth(1).unwrap(),
+            Path::new(r"\\server\share\update cache\app.msi")
+        );
+    }
+
+    #[test]
+    fn installer_boundary_rejects_device_relative_ambiguous_and_overlong_paths_before_spawn() {
+        for path in [
+            r"\\.\PhysicalDrive0",
+            r"\\.\pipe\install",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\app.msi",
+            r"\\?\Volume{11111111-1111-1111-1111-111111111111}\app.msi",
+            r"C:relative.msi",
+            r"\rooted-without-drive.msi",
+            "relative.msi",
+            r"\\?\C:\path.\app.msi",
+            r"\\?\C:\path \app.msi",
+            r"\\?\C:\folder\..\app.msi",
+        ] {
+            assert!(windows_installer_path(Path::new(path)).is_err(), "{path}");
+        }
+        let long = format!(r"\\?\C:\{}\app.msi", "a".repeat(260));
+        assert!(windows_installer_path(Path::new(&long)).is_err());
+        assert!(
+            installer_command(
+                Path::new(r"C:\Windows\System32\msiexec.exe"),
+                Path::new(r"C:\update\app.msi"),
+                Path::new(r"\\.\pipe\log"),
+                Path::new(r"C:\update"),
+            )
+            .is_err()
+        );
     }
 
     #[test]

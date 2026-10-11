@@ -6,10 +6,10 @@ v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进�
 
 ## 下载与安装
 
-在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 选择实际已发布的版本。v0.2 发布包包括：
+在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 选择实际已发布的版本。v0.2.1 的目标发布包如下，以实际已发布资产为准：
 
-- `SystemMonitorX-0.2.0-x64.msi`：当前用户安装，默认目录为 `%LOCALAPPDATA%\Programs\SystemMonitorX`，创建开始菜单快捷方式，支持升级和卸载。
-- `SystemMonitorX-0.2.0-x64-portable.zip`：完整解压后运行 `SystemMonitorX.exe`。
+- `SystemMonitorX-0.2.1-x64.msi`：当前用户安装，默认目录为 `%LOCALAPPDATA%\Programs\SystemMonitorX`，创建开始菜单快捷方式，支持升级和卸载。
+- `SystemMonitorX-0.2.1-x64-portable.zip`：完整解压后运行 `SystemMonitorX.exe`。
 - `SHA256SUMS.txt`：MSI 和 ZIP 的 SHA-256 校验值。
 
 支持 Windows 10 1803（Build 17134）及以上 / Windows 11 x64，需要支持 GPUI Direct3D 渲染的显卡和驱动。应用默认按普通用户权限运行；管理员入口由用户主动选择，Windows 负责权限确认。应用不会修改默认任务管理器或系统快捷键。MSI 使用每用户安装范围，实际可用权限仍由 Windows 策略决定；发布包目前未使用商业证书签名。
@@ -18,7 +18,7 @@ v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进�
 
 ## 功能
 
-| 页面 | v0.2 已实现能力 |
+| 页面 | v0.2 系列已实现能力 |
 | --- | --- |
 | 进程 / 详细信息 | 虚拟表格、名称/路径/PID/用户搜索、数值排序、进程树与折叠、列显隐、CPU/工作集/GPU/显存/I/O/逐进程网络列，线程/句柄/私有提交/累计 CPU 时间/会话等详细列；文件定位、结束进程或进程树、优先级、当前处理器组亲和性、效率模式、运行新任务和 CSV 导出 |
 | 选中进程详情 | 按需异步读取真实命令行、x86/x64 等架构、WOW64 状态、文件描述/公司/产品/版本资源；可手动重新读取 |
@@ -55,7 +55,9 @@ v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进�
 
 安装成功后启动实际安装版；便携版的一键更新也会安装并启动当前用户安装版。取消或安装失败后重新打开原应用。助手缺失、验证失败或另一个窗口正在安装时，当前窗口保持打开并显示原因。安装结果保存在 `%LOCALAPPDATA%\SystemMonitorX\updates\last-install-result.json`，各次日志位于对应 helper 缓存目录。
 
-本机优化 release + `ui-test` 构建的 23 项原生 UI 检查已通过，响应测量见下文；实际 MSI 安装、升级/取消/失败恢复和重启仍待验证。助手源码测试与坏任务拒绝测试不等于安装已成功，状态见 [ROADMAP.md](ROADMAP.md) 和对应发布/构建记录。
+v0.2.0 的真实更新流程已完成下载、SHA-256 校验与安装助手交接，但 MSI 安装返回 1619，日志出现 SourceDir 1314；原因是文件 canonical 化后的 `\\?\` 扩展路径进入了 Windows Installer 命令行。v0.2.1 针对该路径兼容性问题修订，实际本机安装、升级/取消/失败恢复和重启仍待验证。
+
+v0.2.0 优化 release + `ui-test` 构建的 23 项原生 UI 检查已通过，响应测量见下文。助手源码测试、成功下载或成功交接不等于安装成功，状态见 [ROADMAP.md](ROADMAP.md) 和对应发布/构建记录。
 
 ## 快捷键与本地数据
 
@@ -88,7 +90,7 @@ cargo run --bin monitor_probe -- --benchmark --output target/benchmark-report.js
 
 可选原生 UI 冒烟使用真实 Windows 窗口和 D3D11，验证导航、搜索、选择、弹窗、暂停、详情和窗口尺寸，并输出响应测量。计时为 **CPU 侧阶段耗时**：完整查询批次包含清空、输入、过滤与显式 `render_frame`，每次按键的 key-down + key-up 另行直接计时。分发包含框架同步绘制 dirty view 的开销及 test-support instrumentation；排除 PNG 编码，不是 GPU 实际呈现延迟。独立 10,000 行 filter/sort 压力数据明确标为 synthetic，不注入真实遥测。截图和诊断报告可能包含本机进程及设备信息，输出保存在仓库之外。
 
-2026-10-11，本机优化 release + `ui-test` 构建的 23 项检查通过，覆盖进程、硬件、DX12、用户、历史、列、进程树、详情和置顶。940 个真实进程下采集 30 组查询批次、230 次实际按键（460 个 key-down/key-up 事件），百分位使用 nearest-rank：
+2026-10-11，v0.2.0 本机优化 release + `ui-test` 构建的 23 项检查通过，覆盖进程、硬件、DX12、用户、历史、列、进程树、详情和置顶。940 个真实进程下采集 30 组查询批次、230 次实际按键（460 个 key-down/key-up 事件），百分位使用 nearest-rank：
 
 | CPU 阶段 | 样本数 | p50 | p95 | 最大值 |
 | --- | ---: | ---: | ---: | ---: |
@@ -102,7 +104,7 @@ cargo run --bin monitor_probe -- --benchmark --output target/benchmark-report.js
 cargo run --release --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
 ```
 
-当前已有源码模块测试、部分本机后端验证和上述发布版原生 UI 检查与响应测量；实际 MSI 升级及长时性能仍需验证。本机管理员 ETW 的自有回环累计字节与清理已单独通过，每协议字节/丢失、长期负载和跨版本回归仍未完成；也没有对官方任务管理器的同条件性能基线。
+当前已有源码模块测试、部分本机后端验证和上述 v0.2.0 发布版原生 UI 检查与响应测量；v0.2.1 实际 MSI 安装/升级及长时性能仍需验证。本机管理员 ETW 的自有回环累计字节与清理已单独通过，每协议字节/丢失、长期负载和跨版本回归仍未完成；也没有对官方任务管理器的同条件性能基线。
 
 ## 项目结构
 
