@@ -1,105 +1,139 @@
 # SystemMonitorX
 
-Windows 专用的原生任务管理器替代应用，使用 **Rust 2024 + Longbridge GPUI Kit 0.7.1**。
+面向 Windows 10/11 的原生系统监控与进程管理器，使用 **Rust 2024 + Longbridge GPUI Kit 0.7.1**。公开仓库：[neko233-com/SystemMonitorX](https://github.com/neko233-com/SystemMonitorX)。
 
-无需 Electron、浏览器或 WebView。GPUI 使用 Windows 原生窗口与 GPU 加速渲染；sysinfo、DXGI、WDDM/PDH 与 Win32 API 负责实际采集和管理。
+v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进程网络采集、进程树、管理操作和一键更新。GPUI 使用原生 Windows 窗口，界面当前由 **Direct3D 11** 渲染；DirectX 12 页面查询各显卡的实际能力。完整任务管理器替代目标、待实现项和验证进度见 [ROADMAP.md](ROADMAP.md)。
 
-## 下载与运行
+## 下载与安装
 
-在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 下载：
+在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 选择实际已发布的版本。v0.2 发布包包括：
 
-- `SystemMonitorX-0.1.0-x64.msi`：当前用户安装，无需管理员权限，创建开始菜单快捷方式，支持升级和卸载。
-- `SystemMonitorX-0.1.0-x64-portable.zip`：解压后运行 `SystemMonitorX.exe`。
-- `SHA256SUMS.txt`：安装包和便携包的校验值。
+- `SystemMonitorX-0.2.0-x64.msi`：当前用户安装，默认目录为 `%LOCALAPPDATA%\Programs\SystemMonitorX`，创建开始菜单快捷方式，支持升级和卸载。
+- `SystemMonitorX-0.2.0-x64-portable.zip`：完整解压后运行 `SystemMonitorX.exe`。
+- `SHA256SUMS.txt`：MSI 和 ZIP 的 SHA-256 校验值。
 
-支持 Windows 10 1803（Build 17134）及以上 / Windows 11 x64，需要支持 GPUI 的 Direct3D 显卡和驱动。默认以普通用户运行；需要管理其他用户的进程时，可右键选择“以管理员身份运行”。应用不会自动提升权限，也不会修改默认任务管理器或系统快捷键。
+支持 Windows 10 1803（Build 17134）及以上 / Windows 11 x64，需要支持 GPUI Direct3D 渲染的显卡和驱动。应用默认按普通用户权限运行；管理员入口由用户主动选择，Windows 负责权限确认。应用不会修改默认任务管理器或系统快捷键。MSI 使用每用户安装范围，实际可用权限仍由 Windows 策略决定；发布包目前未使用商业证书签名。
 
-## 已实现功能
+请保留完整包中的 `SystemMonitorXUpdate.exe` 与随包 VC 运行库 DLL。只复制主 EXE、缺少更新助手的开发目录或不完整的便携包无法完成一键升级。
 
-| 页面 | 功能 |
+## 功能
+
+| 页面 | v0.2 已实现能力 |
 | --- | --- |
-| 进程 | 全量虚拟表格、名称/路径/PID 搜索、各列排序、CPU、内存、GPU、GPU 显存、I/O 速率、父 PID、进程详情、文件定位、结束任务、优先级、运行新任务、CSV 导出 |
-| 性能 | CPU/内存/GPU/磁盘/网络实时曲线、120 次采样历史、逐逻辑处理器使用率、处理器型号、核心数和频率 |
-| 设备与传感器 | 系统信息、多 GPU 及整卡专用/共享显存、多卷容量与读写、多网卡吞吐、系统可提供的温度 |
-| 服务 | SCM 真实服务列表、名称、显示名称、状态、PID、启动类型、搜索与刷新（只读） |
-| 启动应用 | HKCU/HKLM Run（32/64 位视图）及用户/公共启动文件夹、搜索与刷新（只读） |
-| 设置 | 0.5 / 1 / 2 秒刷新、深色/浅色主题、本地持久化、快捷键 |
+| 进程 / 详细信息 | 虚拟表格、名称/路径/PID/用户搜索、数值排序、进程树与折叠、列显隐、CPU/工作集/GPU/显存/I/O/逐进程网络列，线程/句柄/私有提交/累计 CPU 时间/会话等详细列；文件定位、结束进程或进程树、优先级、当前处理器组亲和性、效率模式、运行新任务和 CSV 导出 |
+| 选中进程详情 | 按需异步读取真实命令行、x86/x64 等架构、WOW64 状态、文件描述/公司/产品/版本资源；可手动重新读取 |
+| 性能 | CPU/内存/多 GPU/磁盘/网络实时曲线、120 次采样显示历史、逐逻辑处理器负载；系统线程/句柄/进程数、提交内存及限制、缓存与内核内存等系统可提供的数据 |
+| 设备与传感器 | CPU 型号/核心/缓存、主板/BIOS、DIMM 容量/速率/槽位/厂商、物理磁盘型号/总线/固件、网卡硬件/链路/驱动、GPU 驱动/PCI/显示设备；支持设备的 NVIDIA NVML 传感器 |
+| DirectX 12 | 按显卡 LUID 查询 D3D12 支持、Feature Level、Shader Model、光追/Mesh Shader/Sampler Feedback 层级、Enhanced Barriers 和节点数，区分软件与虚拟显示设备，显示查询失败原因 |
+| 服务 | SCM 服务、状态/PID/启动类型/配置；选中后启动、停止或重启，后台执行并显示权限/状态错误 |
+| 启动应用 | HKCU/HKLM Run 的 32/64 位视图及用户/公共启动文件夹，读取 StartupApproved 状态并启用/禁用，保留原启动命令 |
+| 用户 | WTS 真实登录会话、用户名/会话状态/进程和资源聚合；带确认的断开与注销操作 |
+| 应用历史 | 观察期间累计 CPU 时间与 I/O，保留已观察的结束进程并按应用聚合、本地持久化/清空；ETW 可用时累计实际网络字节及有效覆盖时长 |
+| 设置 | 0.5 / 1 / 2 秒刷新、主题、置顶、列显隐本地保存、管理员入口、自动/手动检查更新、一键下载安装 |
 
-结束任务前有确认；关键系统进程和应用自身受保护。PID 与创建时间共同校验，操作在同一已验证的 Win32 句柄上执行，避免误操作被 Windows 重用的 PID。采集在专用线程执行，UI 只读取快照。
+结束进程、结束树、服务、启动项及会话管理提供明确的目标与确认。进程操作用 PID 与原始创建 FILETIME 核验，在已验证的句柄上执行；关键系统进程及本应用受保护。进程树根据真实父 PID 和出生时间建立，搜索时显示匹配列表。批量采集、WMI/DirectX 查询、网络、详情读取和管理操作在后台执行，UI 使用不可变采集快照。
 
-## 指标说明与当前边界
+## 指标来源与边界
 
-- CPU 与进程 CPU 都以整台机器为 100%；首轮不足两次有效采样时显示“采样中”。
-- GPU 使用率按适配器 LUID、物理节点和引擎聚合，显示最忙引擎，不把独立引擎的使用率相加。支持符合 WDDM 的 NVIDIA、AMD 与 Intel；实际可用项取决于驱动和系统计数器。
-- 整卡显存来自 `GPU Adapter Memory` 的 PDH 计数器；DXGI 提供显卡名称和容量。DXGI 的“当前进程预算”不被冒充为整卡使用量。间接/虚拟显示设备被过滤。
-- 内存采用进程工作集，GPU 进程内存由 WDDM 计数器提供。共享内存/共享资源的统计不能简单相加来计算全系统使用量。
-- Windows 的进程 GPU 内存计数器存在[微软记录的累积错误](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/gpu-process-memory-counters-report-wrong-value)。当单进程专用显存计数超过该显卡已知的正容量时，应用将该进程 GPU 内存显示为不可用，并在进程/设备页提示；不会裁剪成伪造数值，整卡统计独立保留。此校验只识别明显异常，不能保证发现所有系统计数器错误。
-- 字节量按 1024 换算为 KB / MB / GB；吞吐为字节/秒。进程 I/O 是 Windows `GetProcessIoCounters` 的读写传输量，也可能包含文件之外的设备 I/O；磁盘卷指标由 `IOCTL_DISK_PERFORMANCE` 采集。
-- `—` 表示权限不足、计数器未提供或样本不足，成功采集到的空闲值显示 0。受保护进程的部分 sysinfo 字段可能由操作系统返回零。
-- CPU/GPU 温度、风扇转速、功耗并非所有 Windows 驱动都有通用接口。当前只展示系统可读取的温度，不捏造数值；厂商 NVML/ADL、硬件传感器驱动尚未接入。
-- 逐进程网络流量需要 ETW/WFP 采集器，当前支持每网卡和全机网络吞吐。启动项与服务当前为只读；启动项不覆盖所有计划任务、UWP 或第三方登录触发器。
-- 这是首个可用版本，不声称已经覆盖 Windows 任务管理器的每个管理功能。安装包目前未做商业证书签名。
+- **CPU / 进程**：Native `NtQuerySystemInformation` 批量读取真实进程 CPU 累计时间、线程、句柄、工作集、私有提交及 I/O 等计数，使用真实采样间隔计算速率；不可用时保留回退/失败说明。CPU 百分比以整台机器为 100%，首轮不足有效样本时显示采样中。
+- **内存 / I/O**：默认进程内存为工作集，详细列提供私有提交。共享页可能在多个工作集中重复计算，不能把各进程工作集之和当作物理内存使用量。系统提交/缓存/内核内存来自 Win32 性能信息。进程 I/O 包括文件、设备和其他读取/写入；卷指标由 `IOCTL_DISK_PERFORMANCE` 提供。字节按 1024 换算为 KB/MB/GB，吞吐为字节/秒。
+- **GPU**：DXGI/D3DKMT 提供适配器身份和容量；WDDM/PDH 按 LUID、节点和引擎聚合负载，显示最忙引擎。计数与应用使用 DirectX 11、DirectX 12 等图形 API 的关系由 WDDM 决定，实际字段取决于驱动。整卡显存使用 `GPU Adapter Memory`，不把 DXGI 的本应用显存预算当作整卡用量。
+- **GPU 计数异常**：Windows 进程 GPU 内存存在[微软记录的累积计数错误](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/gpu-process-memory-counters-report-wrong-value)。单进程专用显存超过对应显卡已知正容量时显示不可用并说明原因；整卡数据独立保留。该校验只能识别明显异常。
+- **硬件 / 传感器**：静态设备由 WMI/Win32 查询并缓存，可手动刷新；型号、容量和驱动字段保留系统来源。NVML 在可准确匹配的 NVIDIA 设备上读取温度、功耗/功率上限、风扇百分比、核心/显存频率和 PCIe 链路信息。AMD/Intel 提供通用设备信息，厂商传感器接口尚未接入；CPU 温度等也只有系统实际提供时显示。
+- **逐进程网络**：后端使用 Kernel-Network ETW 与 TDH schema 解码 TCP/UDP、IPv4/IPv6 的事件字节，按 PID 与精确创建时间关联，拒绝 PID 重用继承，按实际间隔计算速率。通常需要管理员/内核 ETW 权限。无权限、丢事件或 schema 失败时显示 `—` 与状态；成功采到的空闲值为 0。普通权限拒绝路径与本机管理员自有回环已实测：自身 PID 的累计发送/接收各 163,840 字节，私有追踪句柄清理通过；四协议 schema 已单元测试，真实 trace 出现 TCP/UDP IPv4/IPv6 四类事件。四类事件计数属于整个 trace，尚未独立验证自有 PID 的每协议字节与丢失；长期负载、其他 Windows schema、外网与不同环境仍需验证。
+- **应用历史**：CPU/I/O 从首次观察的累计计数基线计算，未运行本应用或两次采样之间出生又结束的进程不会凭空补记。网络历史累加完整 ETW 周期的实际字节，不积分已舍入的速率；“网络有效进程秒”是各实例有效覆盖时长之和，有权限或丢事件缺口时明确提示。本地历史有容量上限，不是 Windows 全系统审计日志。
+- **进程详情**：只为选中的精确身份加载，不每秒遍历所有进程的命令行和文件资源。公司名称来自 EXE 的版本资源，尚未验证 Authenticode 发布者；远程进程当前目录没有采用不稳定的 PEB 读取方式，当前显示不可用。
+- **管理覆盖范围**：CPU 亲和性操作限定当前处理器组；启动项尚未覆盖所有计划任务、UWP/打包应用及第三方登录触发器，也没有启动影响测量。用户页提供会话聚合与管理，逐用户展开进程等仍在路线图中。
 
-## 快捷键
+`—` 表示权限、驱动、系统能力或样本条件未满足，不用假数补齐。尚未证明与 Windows 任务管理器完全等同，也没有全面性能对比结果。
+
+## 一键更新
+
+应用运行时默认每 6 小时后台检查项目的稳定版本，失败后重试，可在设置关闭自动检查或立即手动检查。后台检查只检查版本；点击“一键更新”后才执行下载和安装。
+
+下载器核验项目发布地址、稳定版本、安装包名称、大小和 SHA-256。安装助手复制到 `%LOCALAPPDATA%\SystemMonitorX\updates\helper-{标识}`，保留完整运行库，再次核验并锁住 MSI，获取安装互斥锁，确认就绪后主窗口正常退出。助手最多等待旧 PID 的精确 FILETIME 身份退出 30 秒，使用系统 Windows Installer 显示安装进度、禁止自动重启电脑，保存安装日志与结果。
+
+安装成功后启动实际安装版；便携版的一键更新也会安装并启动当前用户安装版。取消或安装失败后重新打开原应用。助手缺失、验证失败或另一个窗口正在安装时，当前窗口保持打开并显示原因。安装结果保存在 `%LOCALAPPDATA%\SystemMonitorX\updates\last-install-result.json`，各次日志位于对应 helper 缓存目录。
+
+本机优化 release + `ui-test` 构建的 23 项原生 UI 检查已通过，响应测量见下文；实际 MSI 安装、升级/取消/失败恢复和重启仍待验证。助手源码测试与坏任务拒绝测试不等于安装已成功，状态见 [ROADMAP.md](ROADMAP.md) 和对应发布/构建记录。
+
+## 快捷键与本地数据
 
 | 快捷键 | 操作 |
 | --- | --- |
 | Ctrl + F | 搜索 |
 | Ctrl + N | 运行新任务 |
 | Ctrl + E | 导出 CSV（系统保存对话框） |
-| Ctrl + P | 暂停/恢复显示；后台仍采集，恢复后显示最新快照 |
+| Ctrl + P | 暂停/恢复显示；后台仍采集 |
 
-设置保存在 `%LOCALAPPDATA%\SystemMonitorX\settings.json`。不上传遥测或进程信息。
+设置：`%LOCALAPPDATA%\SystemMonitorX\settings.json`。应用历史：`%LOCALAPPDATA%\SystemMonitorX\history-v1.json`。更新缓存和安装日志保存在同目录的 `updates` 子目录。版本检查访问本项目的 GitHub 发布地址，不上传进程或设备遥测。
 
-## 开发
+## 开发与验证
 
-需要 Rust 1.96.0、Visual Studio 的 **使用 C++ 的桌面开发** 工作负载，以及 Windows 10/11 SDK。打包需要 .NET SDK 和 WiX 5.0.2。
+需要 Rust 1.96.0、Visual Studio **使用 C++ 的桌面开发** 工作负载与 Windows 10/11 SDK。打包需要 .NET SDK 和 WiX 5.0.2；依赖由 `Cargo.lock` 锁定。
 
 ```powershell
 . ./scripts/Enter-DevEnvironment.ps1
 cargo run --bin SystemMonitorX
-```
-
-`Enter-DevEnvironment.ps1` 自动查找含完整 x64 C++ 运行库的 Visual Studio 安装，避免误选未安装 C++ 工作负载的新版本。
-
-```powershell
 ./scripts/Verify.ps1
 ./scripts/Package.ps1
 ```
 
-`Verify.ps1` 运行格式、Clippy、测试及真实系统诊断。诊断只对自己的专用测试子进程做优先级/结束任务验证，不操作用户已有进程。
+环境脚本寻找完整的 x64 C++ 工具链。验证脚本执行格式、Clippy、测试和真实系统诊断；进程修改验证只操作它自己创建的专用子进程。打包检查 MSI 属性、每用户目标目录、快捷方式及提取后的文件哈希。GitHub Actions 在 Windows 构建，版本标签触发发布；实际结果以构建日志和 Release 资产为准。
 
 ```powershell
 cargo run --bin monitor_probe -- --smoke --verify-operations --output target/smoke-report.json
+cargo run --bin monitor_probe -- --benchmark --output target/benchmark-report.json
 ```
 
-GitHub Actions 在 Windows 上验证并上传 MSI/ZIP。推送 `v*` 标签时自动创建 GitHub Release；依赖版本由 `Cargo.lock` 锁定，动作固定到提交 SHA。
+可选原生 UI 冒烟使用真实 Windows 窗口和 D3D11，验证导航、搜索、选择、弹窗、暂停、详情和窗口尺寸，并输出响应测量。计时为 **CPU 侧阶段耗时**：完整查询批次包含清空、输入、过滤与显式 `render_frame`，每次按键的 key-down + key-up 另行直接计时。分发包含框架同步绘制 dirty view 的开销及 test-support instrumentation；排除 PNG 编码，不是 GPU 实际呈现延迟。独立 10,000 行 filter/sort 压力数据明确标为 synthetic，不注入真实遥测。截图和诊断报告可能包含本机进程及设备信息，输出保存在仓库之外。
 
-可选的原生 UI 冒烟测试使用实际 Windows 窗口和 D3D11 渲染，检查搜索、暂停、导航、弹窗及最小尺寸。输出目录应放在仓库之外，截图可能包含本机进程信息：
+2026-10-11，本机优化 release + `ui-test` 构建的 23 项检查通过，覆盖进程、硬件、DX12、用户、历史、列、进程树、详情和置顶。940 个真实进程下采集 30 组查询批次、230 次实际按键（460 个 key-down/key-up 事件），百分位使用 nearest-rank：
+
+| CPU 阶段 | 样本数 | p50 | p95 | 最大值 |
+| --- | ---: | ---: | ---: | ---: |
+| 每次按键直接计时 | 230 | 5.3164 ms | 6.6954 ms | 8.0354 ms |
+| 显式 `render_frame` | 30 | 4.7491 ms | 7.7874 ms | 7.8613 ms |
+| 完整 14 字符 `SystemMonitorX` 查询批次 | 10 | 87.8399 ms | 106.6616 ms | 106.6616 ms |
+
+完整查询批次不能当作单键延迟；这些是单机带测试观测开销的结果，不构成官方任务管理器性能对比或“完全不卡”的证明。
 
 ```powershell
-cargo run --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
+cargo run --release --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
 ```
+
+当前已有源码模块测试、部分本机后端验证和上述发布版原生 UI 检查与响应测量；实际 MSI 升级及长时性能仍需验证。本机管理员 ETW 的自有回环累计字节与清理已单独通过，每协议字节/丢失、长期负载和跨版本回归仍未完成；也没有对官方任务管理器的同条件性能基线。
 
 ## 项目结构
 
 ```text
-src/ui/                 GPUI Kit 原生界面、虚拟表格和交互
-src/monitor.rs          CPU/进程/内存/卷/网络采集与速率计算
-src/gpu.rs              DXGI / D3DKMT / PDH GPU 采集
-src/platform.rs         Windows 服务、启动项和进程管理
-src/export.rs           CSV 编码与公式注入防护
-src/bin/monitor_probe.rs 无界面诊断和受控操作验证
-packaging/              WiX 安装器
-scripts/                环境、验证及打包
+src/ui/                    GPUI Kit 界面、虚拟表格、管理及原生 QA
+src/monitor.rs             后台系统快照与采样
+src/performance.rs         Native 进程计数、持久历史与采集基准
+src/network_process.rs     Kernel-Network ETW / TDH
+src/hardware.rs            WMI / Win32 静态设备清单
+src/gpu.rs                 DXGI / D3DKMT / PDH / NVML
+src/directx.rs             按显卡查询 D3D12 能力
+src/process_details.rs     单个精确进程身份的按需详情
+src/process_tree.rs        稳定进程树投影
+src/platform.rs            进程、服务、启动项与会话管理
+src/sessions.rs             WTS 会话与资源聚合
+src/updater.rs              稳定版检查与校验下载
+src/update_install.rs       更新任务、MSI 交接与结果/重启
+src/bin/update_helper.rs    独立安装助手
+src/bin/monitor_probe.rs    无界面诊断与受控操作验证
+packaging/                 WiX 每用户 MSI
+scripts/                   环境、验证与打包
 ```
 
 ## 技术来源
 
-- [Longbridge GPUI Kit](https://github.com/longbridge/gpui-kit)：原 gpui-component，原生控件、虚拟表格、图表与主题。
-- [sysinfo](https://docs.rs/sysinfo/0.39.6/sysinfo/)：CPU、内存、进程、磁盘和网络枚举。
-- [Microsoft GPU 性能统计说明](https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/)：GPU 引擎和显存计数的含义。
-- [Rust for Windows](https://github.com/microsoft/windows-rs)：Win32/DXGI 类型绑定。
-- [WiX Toolset](https://docs.firegiant.com/wix/)：MSI 安装器。
+- [Longbridge GPUI Kit](https://github.com/longbridge/gpui-kit)：原生控件、虚拟表格、图表与主题。
+- [sysinfo](https://docs.rs/sysinfo/0.39.6/sysinfo/)：跨平台采集和 Windows 回退能力。
+- [Rust for Windows](https://github.com/microsoft/windows-rs)：Win32/DXGI/Direct3D 类型绑定。
+- [Microsoft GPU 性能统计说明](https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/)：引擎与显存计数含义。
+- [NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/index.html)：设备传感器接口。
+- [Windows Installer 参数](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/msiexec)：安装进度、重启与日志。
+- [WiX Toolset](https://docs.firegiant.com/wix/)：MSI 打包。
 
 Apache-2.0，详见 [LICENSE](LICENSE)。

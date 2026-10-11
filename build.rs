@@ -1,6 +1,15 @@
 fn main() {
     #[cfg(windows)]
     {
+        println!("cargo:rerun-if-changed=assets/update-helper.manifest");
+        let manifest = std::path::Path::new("assets/update-helper.manifest")
+            .canonicalize()
+            .expect("helper manifest");
+        println!("cargo:rustc-link-arg-bin=SystemMonitorXUpdate=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=SystemMonitorXUpdate=/MANIFESTINPUT:{}",
+            manifest.display()
+        );
         let mut resource = winresource::WindowsResource::new();
         resource
             .set("ProductName", "SystemMonitorX")

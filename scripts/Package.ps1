@@ -19,14 +19,15 @@ try {
         throw 'MSI requires a three-part numeric version with major/minor <=255 and patch <=65535.'
     }
     if (-not $SkipBuild) {
-        & cargo build --release --locked
+        & cargo build --release --locked --bins
         if ($LASTEXITCODE -ne 0) { throw "Release build failed (exit $LASTEXITCODE)." }
     }
     if (-not (Get-Command wix -ErrorAction SilentlyContinue)) { throw 'Install WiX 5.0.2: dotnet tool install --global wix --version 5.0.2 --allow-roll-forward' }
     $taskWixVersion = (& wix --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $taskWixVersion -notmatch '^5\.0\.2(?:\+|$)') { throw "WiX 5.0.2 is required; found '$taskWixVersion'." }
     $taskExe = Join-Path $taskRoot 'target/release/SystemMonitorX.exe'
-    foreach ($taskRequired in @($taskExe, (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md'), (Join-Path $taskRoot 'assets/app.ico'))) {
+    $taskUpdaterExe = Join-Path $taskRoot 'target/release/SystemMonitorXUpdate.exe'
+    foreach ($taskRequired in @($taskExe, $taskUpdaterExe, (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md'), (Join-Path $taskRoot 'assets/app.ico'))) {
         if (-not (Test-Path -LiteralPath $taskRequired -PathType Leaf)) { throw "Required packaging input is missing: $taskRequired" }
     }
 
@@ -34,16 +35,19 @@ try {
     $taskStage = Join-Path $taskTempRoot ('SystemMonitorX-package-' + [guid]::NewGuid().ToString('N'))
     $taskPayload = Join-Path $taskStage 'payload'
     New-Item -ItemType Directory -Path $taskPayload -Force | Out-Null
-    Copy-Item -LiteralPath $taskExe -Destination $taskPayload
+    Copy-Item -LiteralPath $taskExe, $taskUpdaterExe -Destination $taskPayload
     Copy-Item -LiteralPath (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md') -Destination $taskPayload
 
-    # Import inspection decides whether app-local Microsoft VC runtime files
-    # are needed. Use the matching installed x64 redistributable directory.
-    $taskDependencies = & dumpbin.exe /dependents $taskExe
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect EXE dependencies with dumpbin.' }
+    # The application and detached update helper must both run from the payload.
+    # Inspect the union of their imports before selecting one matching x64 CRT.
+    $taskDependencies = foreach ($taskBinary in @($taskExe, $taskUpdaterExe)) {
+        $taskBinaryDependencies = & dumpbin.exe /dependents $taskBinary
+        if ($LASTEXITCODE -ne 0) { throw "Unable to inspect dependencies of $taskBinary with dumpbin." }
+        $taskBinaryDependencies
+    }
     $taskRuntimeImports = @($taskDependencies | ForEach-Object {
         if ($_ -match '^\s*((?:vcruntime|msvcp|concrt)[A-Za-z0-9_]*\.dll)\s*$') { $Matches[1] }
-    })
+    } | Sort-Object -Unique)
     $taskRuntimeFiles = @()
     if ($taskRuntimeImports.Count -gt 0) {
         $taskRedistRoot = Join-Path $env:VSINSTALLDIR 'VC/Redist/MSVC'
@@ -89,16 +93,11 @@ try {
     }
     & wix @taskWixArgs
     if ($LASTEXITCODE -ne 0) { throw "MSI build failed (exit $LASTEXITCODE)." }
-    & (Join-Path $PSScriptRoot 'Verify.ps1') -PackageOnly -MsiPath $taskMsi -Version $Version -PayloadDirectory $taskPayload
 
     if (Test-Path -LiteralPath $taskZip) { Remove-Item -LiteralPath $taskZip -Force }
     [IO.Compression.ZipFile]::CreateFromDirectory($taskPayload, $taskZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-    $taskArchive = [IO.Compression.ZipFile]::OpenRead($taskZip)
-    try {
-        $taskZipEntries = @($taskArchive.Entries | ForEach-Object FullName | Sort-Object)
-        $taskExpectedEntries = @(Get-ChildItem -LiteralPath $taskPayload -File | ForEach-Object Name | Sort-Object)
-        if (Compare-Object $taskExpectedEntries $taskZipEntries) { throw 'Portable ZIP contents do not match the verified payload.' }
-    } finally { $taskArchive.Dispose() }
+    & (Join-Path $PSScriptRoot 'Verify.ps1') -PackageOnly -MsiPath $taskMsi -ZipPath $taskZip -Version $Version -PayloadDirectory $taskPayload
+
     $taskHashes = foreach ($taskFile in @($taskMsi, $taskZip)) {
         "{0}  {1}" -f (Get-FileHash -LiteralPath $taskFile -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $taskFile -Leaf)
     }

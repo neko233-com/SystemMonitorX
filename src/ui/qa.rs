@@ -19,6 +19,7 @@ pub fn start(
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
+        let mut performance = serde_json::Value::Null;
         let result: Result<()> = async {
             std::fs::create_dir_all(&directory)?;
             smol::Timer::after(Duration::from_secs(6)).await;
@@ -33,7 +34,7 @@ pub fn start(
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).search.read(cx).value().contains("SystemMonitorX"),"Ctrl+F/input failed");
                 let table=view.read(cx).processes.read(cx).delegate();
-                ensure!(!table.rows.is_empty() && table.rows.iter().all(|p|p.name.to_lowercase().contains("systemmonitorx")),"filter failed");
+                ensure!(!table.rows.is_empty() && (0..table.rows.len()).all(|i|table.row(i).unwrap().name.to_lowercase().contains("systemmonitorx")),"filter failed");
                 capture(handle,cx,&directory.join("02-filtered.png"))?;
                 handle.update(cx,|_,w,cx|{w.click(("row",0usize),cx);})?;
                 Ok::<(), anyhow::Error>(())
@@ -66,6 +67,8 @@ pub fn start(
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).page==Page::Devices,"devices navigation failed");
+                ensure!(view.read(cx).hardware.is_some(), "hardware inventory did not arrive");
+                ensure!(view.read(cx).directx_inventory.as_ref().is_some_and(|i| !i.adapters.is_empty()), "DirectX inventory did not arrive");
                 capture(handle,cx,&directory.join("04-devices.png"))?;
                 handle.update(cx,|_,w,cx|{w.click("nav-服务",cx);})?;
                 Ok::<(), anyhow::Error>(())
@@ -104,10 +107,90 @@ pub fn start(
             })?;
             smol::Timer::after(Duration::from_millis(300)).await;
             cx.update(|cx| -> Result<()> {capture(handle,cx,&directory.join("09-small-window.png"))?;Ok::<(), anyhow::Error>(())})?;
+            for (page, label, filename) in [
+                (Page::History, "nav-应用历史", "10-history.png"),
+                (Page::Users, "nav-用户", "11-users.png"),
+                (Page::Details, "nav-详细信息", "12-details.png"),
+            ] {
+                cx.update(|cx| handle.update(cx, |_, window, cx| window.click(label, cx)))?;
+                smol::Timer::after(Duration::from_millis(300)).await;
+                cx.update(|cx| -> Result<()> {
+                    ensure!(view.read(cx).page == page, "new navigation failed: {label}");
+                    if page == Page::History {
+                        ensure!(!view.read(cx).app_history.read(cx).delegate().rows.is_empty(), "application history empty");
+                    }
+                    if page == Page::Users {
+                        ensure!(!view.read(cx).users.read(cx).delegate().rows.is_empty(), "local logged-in users empty");
+                    }
+                    if page == Page::Details {
+                        ensure!(view.read(cx).processes.read(cx).delegate().detailed, "details columns not enabled");
+                    }
+                    capture(handle, cx, &directory.join(filename))
+                })?;
+            }
+            cx.update(|cx| handle.update(cx, |_, window, cx| {
+                window.press("ctrl-f", cx);
+                window.press("ctrl-a",cx);
+                window.input(&std::process::id().to_string(), cx);
+            }))?;
+            smol::Timer::after(Duration::from_millis(200)).await;
+            cx.update(|cx| -> Result<()> {
+                let table = view.read(cx).processes.read(cx).delegate();
+                ensure!(table.rows.len() == 1 && table.row(0).is_some_and(|p| p.pid == std::process::id()), "own PID filter did not settle");
+                handle.update(cx, |_,window,cx| {
+                    window.render_frame(cx);
+                    window.click(("row",0usize),cx);
+                })?;
+                Ok(())
+            })?;
+            smol::Timer::after(Duration::from_millis(500)).await;
+            cx.update(|cx| -> Result<()> {
+                let app = view.read(cx);
+                ensure!(app.process_details.as_ref().is_some_and(|d| d.pid == std::process::id() && d.command_line.is_some()), "asynchronous own-process details did not arrive: {:?}",app.process_details_error);
+                handle.update(cx, |_, window, cx| window.click("toggle-process-details",cx))?;
+                capture(handle,cx,&directory.join("13-selected-details.png"))
+            })?;
+            cx.update(|cx| handle.update(cx, |_, window, cx| { window.resize(size(px(1380.),px(860.)));window.click("nav-设置",cx); }))?;
+            smol::Timer::after(Duration::from_millis(200)).await;
+            cx.update(|cx| -> Result<()> {
+                let previous = view.read(cx).settings.always_on_top;
+                handle.update(cx, |_, window, cx| {
+                    window.click("topmost",cx);
+                    window.render_frame(cx);
+                })?;
+                ensure!(view.read(cx).settings.always_on_top != previous, "topmost did not toggle");
+                handle.update(cx, |_, window, cx| window.click("topmost",cx))?;
+                ensure!(view.read(cx).settings.always_on_top == previous, "topmost setting did not restore");
+                Ok(())
+            })?;
+            cx.update(|cx| handle.update(cx, |_, window, cx| window.click("nav-进程", cx)))?;
+            smol::Timer::after(Duration::from_millis(200)).await;
+            cx.update(|cx| -> Result<()> {
+                handle.update(cx, |_, window, cx| {
+                    window.click("process-columns",cx);
+                    window.render_frame(cx);
+                    ensure!(window.has_active_dialog(cx), "process column chooser did not open");
+                    Ok::<(), anyhow::Error>(())
+                })??;
+                capture(handle,cx,&directory.join("14-process-columns.png"))?;
+                handle.update(cx, |_, window, cx| {
+                    window.click("process-columns-close",cx);
+                    window.render_frame(cx);
+                    ensure!(!window.has_active_dialog(cx), "column chooser did not close");
+                    window.click("tree-mode",cx);
+                    window.render_frame(cx);
+                    Ok::<(), anyhow::Error>(())
+                })??;
+                ensure!(view.read(cx).processes.read(cx).delegate().tree_mode, "tree mode did not toggle");
+                handle.update(cx, |_, window, cx| window.click("tree-mode",cx))?;
+                ensure!(!view.read(cx).processes.read(cx).delegate().tree_mode, "tree mode did not restore");
+                Ok(())
+            })?;
+            performance = super::qa_performance::measure(handle,view.clone(),cx).await?;
             Ok::<(), anyhow::Error>(())
         }.await.context("native UI smoke");
         let report = match result {
-            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","services","startup","settings","new task dialog","empty command error and cancel","minimum window size"]}),
+            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","performance":performance,"checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","real hardware and DirectX capabilities","column chooser open/close","process tree toggle and restore","services","startup","settings","new task dialog","empty command error and cancel","minimum window size","history","Windows sessions","extended process columns","asynchronous command line and architecture","topmost toggle and restoration","native responsiveness measurement"]}),
             Err(error) => serde_json::json!({"passed":false,"error":format!("{error:#}")}),
         };
         let _ = std::fs::write(directory.join("ui-report.json"),serde_json::to_vec_pretty(&report).unwrap());

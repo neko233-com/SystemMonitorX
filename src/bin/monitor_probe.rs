@@ -25,6 +25,7 @@ mod windows_probe {
         smoke: bool,
         verify_operations: bool,
         output: Option<PathBuf>,
+        benchmark: bool,
     }
 
     pub fn run() -> Result<()> {
@@ -47,6 +48,7 @@ mod windows_probe {
             match argument.to_str() {
                 Some("--smoke") => options.smoke = true,
                 Some("--verify-operations") => options.verify_operations = true,
+                Some("--benchmark") => options.benchmark = true,
                 Some("--output") => {
                     let path = arguments.next().context("--output requires a file path")?;
                     ensure!(!path.is_empty(), "--output path must not be empty");
@@ -54,7 +56,7 @@ mod windows_probe {
                 }
                 Some("--help" | "-h") => {
                     println!(
-                        "monitor_probe [--smoke] [--verify-operations] [--output FILE]\n\nSamples real Windows telemetry twice, one second apart. Prints JSON to stdout.\n--smoke exits with an error when collector sanity checks fail.\n--verify-operations tests priority and termination only on its own child process.\n--output also saves the JSON report to FILE."
+                        "monitor_probe [--smoke] [--verify-operations] [--benchmark] [--output FILE]\n\nSamples real Windows telemetry twice, one second apart. Prints JSON to stdout.\n--smoke exits with an error when collector sanity checks fail.\n--verify-operations tests priority and termination only on its own child process.\n--benchmark measures 30 real samples at 250ms cadence, CPU and memory.\n--output also saves the JSON report to FILE."
                     );
                     return Ok(());
                 }
@@ -62,7 +64,24 @@ mod windows_probe {
             }
         }
 
-        let mut monitor = Monitor::new();
+        // Diagnostics must not populate or reset the user's persistent history.
+        let mut monitor = Monitor::new_in_memory();
+        let benchmark = if options.benchmark {
+            Some(system_monitor_x::performance::run_benchmark(
+                &mut monitor,
+                30,
+                Duration::from_millis(250),
+            )?)
+        } else {
+            None
+        };
+        if let Some(benchmark) = &benchmark
+            && !options.smoke
+            && !options.verify_operations
+        {
+            write_report(&serde_json::to_value(benchmark)?, options.output.as_ref())?;
+            return Ok(());
+        }
         let first = monitor.sample();
         std::thread::sleep(Duration::from_secs(1));
         let second = monitor.sample();
@@ -108,7 +127,7 @@ mod windows_probe {
         let mut report = snapshot_report(&second);
         report["application"] = json!("SystemMonitorX");
         report["version"] = json!(env!("CARGO_PKG_VERSION"));
-        report["schema_version"] = json!(1);
+        report["schema_version"] = json!(2);
         report["generated_at_unix_seconds"] =
             json!(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs());
         report["sampling"] = json!({
@@ -117,7 +136,10 @@ mod windows_probe {
             "observed_interval_seconds": second.sample_interval_secs,
             "first_cpu_ready": first.cpu_ready,
             "second_cpu_ready": second.cpu_ready,
+            "first_collector_duration_ms": first.collector_duration_ms,
+            "second_collector_duration_ms": second.collector_duration_ms,
         });
+        report["benchmark"] = json!(benchmark);
         report["services"] = services;
         report["startup"] = startup;
         report["privileges"] = elevation;
@@ -126,22 +148,7 @@ mod windows_probe {
         report["operations"] = operations;
         report["passed"] = json!(smoke_passed && operations_passed);
 
-        let encoded = serde_json::to_string_pretty(&report)?;
-        if let Some(path) = options.output {
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                std::fs::create_dir_all(parent).with_context(|| {
-                    format!("Cannot create report directory {}", parent.display())
-                })?;
-            }
-            std::fs::write(&path, format!("{encoded}\n"))
-                .with_context(|| format!("Cannot write report {}", path.display()))?;
-        }
-        let mut stdout = std::io::stdout().lock();
-        writeln!(stdout, "{encoded}")?;
-        stdout.flush()?;
+        write_report(&report, options.output.as_ref())?;
         ensure!(
             !options.smoke || smoke_passed,
             "Collector smoke checks failed; see the JSON report"
@@ -150,6 +157,26 @@ mod windows_probe {
             operations_passed,
             "Owned-child operation checks failed; see the JSON report"
         );
+        Ok(())
+    }
+
+    fn write_report(report: &Value, output: Option<&PathBuf>) -> Result<()> {
+        let encoded = serde_json::to_string_pretty(report)?;
+        if let Some(path) = output {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("Cannot create report directory {}", parent.display())
+                })?;
+            }
+            std::fs::write(path, format!("{encoded}\n"))
+                .with_context(|| format!("Cannot write report {}", path.display()))?;
+        }
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{encoded}")?;
+        stdout.flush()?;
         Ok(())
     }
 
@@ -167,6 +194,9 @@ mod windows_probe {
                 "architecture": snapshot.architecture,
                 "uptime_seconds": snapshot.uptime_secs,
                 "boot_time_unix_seconds": snapshot.boot_time_unix_secs,
+                "native_process_count": snapshot.system_process_count,
+                "native_thread_count": snapshot.system_thread_count,
+                "native_handle_count": snapshot.system_handle_count,
             },
             "cpu": {
                 "name": snapshot.cpu_name.trim(),
@@ -187,6 +217,12 @@ mod windows_probe {
                 "usage_percent": snapshot.memory_percent(),
                 "swap_total_bytes": snapshot.swap_total,
                 "swap_used_bytes": snapshot.swap_used,
+                "committed_bytes": snapshot.committed_bytes,
+                "commit_limit_bytes": snapshot.commit_limit_bytes,
+                "commit_peak_bytes": snapshot.commit_peak_bytes,
+                "system_cache_bytes": snapshot.cached_memory_bytes,
+                "kernel_paged_bytes": snapshot.kernel_paged_bytes,
+                "kernel_nonpaged_bytes": snapshot.kernel_nonpaged_bytes,
             },
             "gpu": {
                 "count": snapshot.gpus.len(),
@@ -200,6 +236,23 @@ mod windows_probe {
                     "shared_memory_used_bytes": gpu.shared_memory_used,
                     "shared_memory_total_bytes": gpu.shared_memory_total,
                     "temperature_celsius": gpu.temperature_celsius,
+                    "vendor_id": gpu.vendor_id,
+                    "device_id": gpu.device_id,
+                    "subsystem_id": gpu.subsystem_id,
+                    "pci_address": gpu.pci_address.map(|address| address.to_string()),
+                    "driver_version": gpu.driver_version,
+                    "vbios_version": gpu.vbios_version,
+                    "power_watts": gpu.power_watts,
+                    "power_limit_watts": gpu.power_limit_watts,
+                    "fan_percent": gpu.fan_percent,
+                    "core_clock_mhz": gpu.core_clock_mhz,
+                    "memory_clock_mhz": gpu.memory_clock_mhz,
+                    "pcie_generation": gpu.pcie_generation,
+                    "pcie_width": gpu.pcie_width,
+                    "sensor_source": gpu.sensor_source,
+                    "sensor_note": gpu.sensor_note,
+                    "monitor_process_local_memory_budget_bytes": gpu.monitor_local_memory_budget,
+                    "monitor_process_local_memory_used_bytes": gpu.monitor_local_memory_used,
                     "status": gpu.status,
                     "engines": gpu.engines.iter().map(|engine| json!({
                         "name": engine.name, "usage_percent": engine.usage_percent,
@@ -228,6 +281,13 @@ mod windows_probe {
                 "receive_bytes_per_second": snapshot.network_receive_bytes_per_sec,
                 "transmit_bytes_per_second": snapshot.network_transmit_bytes_per_sec,
                 "note": snapshot.network_note,
+                "process_etw": {
+                    "available": snapshot.process_network_available,
+                    "status": snapshot.process_network_status,
+                    "dropped_events": snapshot.process_network_dropped_events,
+                    "received_rate_measured_process_count": snapshot.processes.iter().filter(|process| process.network_received_bytes_per_sec.is_some()).count(),
+                    "transmitted_rate_measured_process_count": snapshot.processes.iter().filter(|process| process.network_transmitted_bytes_per_sec.is_some()).count(),
+                },
                 "interfaces": snapshot.networks.iter().map(|network| json!({
                     "name": network.name, "state": network.state,
                     "mac_address": network.mac_address, "ip_addresses": network.ip_addresses,
@@ -239,9 +299,32 @@ mod windows_probe {
             },
             "processes": {
                 "count": snapshot.processes.len(),
+                "collection_note": snapshot.process_collection_note,
+                "creation_identity_measured_count": snapshot.processes.iter().filter(|process| process.start_time_windows_ticks.is_some()).count(),
+                "username_measured_count": snapshot.processes.iter().filter(|process| process.user_name.is_some()).count(),
+                "thread_count_measured_count": snapshot.processes.iter().filter(|process| process.thread_count.is_some()).count(),
+                "handle_count_measured_count": snapshot.processes.iter().filter(|process| process.handle_count.is_some()).count(),
                 "gpu_usage_measured_count": snapshot.processes.iter().filter(|process| process.gpu_usage.is_some()).count(),
                 "gpu_memory_measured_count": snapshot.processes.iter().filter(|process| process.gpu_memory_bytes.is_some()).count(),
                 "own_process": own.map(process_report),
+            },
+            "sessions": {
+                "count": snapshot.sessions.len(),
+                "note": snapshot.sessions_note,
+                "entries": snapshot.sessions.iter().map(|session| json!({
+                    "id": session.id, "station_name": session.station_name, "state": session.state,
+                    "user_name": session.user_name, "domain": session.domain,
+                    "client_name": session.client_name, "protocol": session.protocol,
+                    "logon_time_windows_ticks": session.logon_time_windows_ticks,
+                    "process_count": session.process_count, "cpu_usage_percent": session.cpu_usage,
+                    "working_set_sum_bytes": session.memory_bytes,
+                    "busiest_process_gpu_usage_percent": session.gpu_usage,
+                })).collect::<Vec<_>>(),
+            },
+            "history": {
+                "storage": "diagnostic_in_memory",
+                "app_count": snapshot.app_history.len(),
+                "note": snapshot.history_note,
             },
             "temperatures": {
                 "available": snapshot.temperatures.iter().any(|temperature| temperature.celsius.is_some())
@@ -261,10 +344,27 @@ mod windows_probe {
         json!({
             "pid": process.pid, "name": process.name,
             "parent_pid": process.parent_pid, "start_time_unix_seconds": process.start_time_unix_secs,
+            "start_time_windows_ticks": process.start_time_windows_ticks,
+            "status": process.status,
+            "exe": process.exe,
+            "user_name": process.user_name,
+            "session_id": process.session_id,
+            "thread_count": process.thread_count,
+            "handle_count": process.handle_count,
             "cpu_usage_percent": process.cpu_usage, "memory_bytes": process.memory_bytes,
+            "cpu_time_seconds": process.cpu_time_seconds,
+            "cpu_time_ticks": process.cpu_time_ticks,
+            "working_set_bytes": process.working_set_bytes,
+            "private_bytes": process.private_bytes,
+            "private_working_set_bytes": process.private_working_set_bytes,
+            "virtual_memory_bytes": process.virtual_memory_bytes,
             "disk_read_bytes_per_second": process.disk_read_bytes_per_sec,
             "disk_write_bytes_per_second": process.disk_write_bytes_per_sec,
+            "total_disk_read_bytes": process.total_disk_read_bytes,
+            "total_disk_write_bytes": process.total_disk_write_bytes,
             "gpu_usage_percent": process.gpu_usage, "gpu_memory_bytes": process.gpu_memory_bytes,
+            "network_received_bytes_per_second": process.network_received_bytes_per_sec,
+            "network_transmitted_bytes_per_second": process.network_transmitted_bytes_per_sec,
         })
     }
 
@@ -344,6 +444,8 @@ mod windows_probe {
                 && snapshot.processes.iter().all(|process| {
                     valid_rate(process.disk_read_bytes_per_sec)
                         && valid_rate(process.disk_write_bytes_per_sec)
+                        && valid_rate(process.network_received_bytes_per_sec)
+                        && valid_rate(process.network_transmitted_bytes_per_sec)
                 }),
             "Available rates are finite and nonnegative; absent providers remain null",
         );
@@ -357,6 +459,52 @@ mod windows_probe {
                         .all(|engine| valid_percentage(engine.usage_percent))
             }),
             "Available GPU and engine percentages are finite and within 0..100; headless hosts may have no GPU",
+        );
+        check(
+            "own_native_process_details",
+            own.is_some_and(|process| {
+                process
+                    .start_time_windows_ticks
+                    .is_some_and(|ticks| ticks > 116_444_736_000_000_000)
+                    && process.thread_count.is_some_and(|threads| threads > 0)
+                    && process.handle_count.is_some_and(|handles| handles > 0)
+                    && process.session_id.is_some()
+                    && process.cpu_time_ticks.is_some()
+                    && process.working_set_bytes.is_some_and(|bytes| bytes > 0)
+                    && process.private_bytes.is_some()
+            }),
+            "The owned process has exact creation identity, native counters, session and memory details",
+        );
+        check(
+            "commit_bounds",
+            snapshot
+                .committed_bytes
+                .zip(snapshot.commit_limit_bytes)
+                .is_none_or(|(used, limit)| used <= limit),
+            "Available native committed memory does not exceed its limit",
+        );
+        check(
+            "unavailable_process_network_is_null",
+            snapshot.process_network_available
+                || snapshot.processes.iter().all(|process| {
+                    process.network_received_bytes_per_sec.is_none()
+                        && process.network_transmitted_bytes_per_sec.is_none()
+                }),
+            "Insufficient ETW privileges or a failed provider leaves all process-network values unavailable",
+        );
+        check(
+            "gpu_sensor_values",
+            snapshot.gpus.iter().all(|gpu| {
+                gpu.temperature_celsius.is_none_or(f32::is_finite)
+                    && gpu
+                        .power_watts
+                        .is_none_or(|watts| watts.is_finite() && watts >= 0.0)
+                    && gpu
+                        .power_limit_watts
+                        .is_none_or(|watts| watts.is_finite() && watts >= 0.0)
+                    && gpu.fan_percent.is_none_or(|percent| percent <= 100)
+            }),
+            "Actual vendor sensor values are finite; unsupported vendor metrics remain null",
         );
         check(
             "disk_range",
@@ -426,9 +574,11 @@ mod windows_probe {
             );
             std::thread::sleep(Duration::from_millis(100));
         };
-        let start_time = identity.start_time_unix_secs;
+        let start_time = identity
+            .start_time_windows_ticks
+            .context("Owned-child exact Windows creation timestamp is unavailable")?;
         let invalid_start = start_time
-            .checked_add(60)
+            .checked_add(1)
             .context("Invalid test start time")?;
         let invalid_priority = platform::set_priority(pid, invalid_start, Priority::BelowNormal);
         ensure!(
@@ -481,7 +631,10 @@ mod windows_probe {
         );
         Ok(json!({
             "requested": true, "passed": true,
-            "owned_child_pid": pid, "owned_child_start_time_unix_seconds": start_time,
+            "owned_child_pid": pid,
+            "owned_child_start_time_unix_seconds": identity.start_time_unix_secs,
+            "owned_child_start_time_windows_ticks": start_time,
+            "mismatched_identity_offset_100ns_ticks": 1,
             "wrong_start_time_priority_rejected": true,
             "wrong_start_time_termination_rejected": true,
             "missing_start_time_termination_rejected": true,

@@ -81,14 +81,40 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $taskAssets = @(Get-ChildItem -LiteralPath dist -File | ForEach-Object FullName)
-          if ($taskAssets.Count -ne 3) { throw 'Expected MSI, portable ZIP and SHA256SUMS.txt.' }
-          gh release view $env:RELEASE_TAG --repo $env:GH_REPO *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG --repo $env:GH_REPO --verify-tag --title "SystemMonitorX $env:RELEASE_TAG" --generate-notes
-            if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
+          $taskVersion = $env:RELEASE_TAG -replace '^v', ''
+          if ($taskVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a stable three-part release tag.' }
+          $taskExpectedNames = @("SystemMonitorX-$taskVersion-x64.msi", "SystemMonitorX-$taskVersion-x64-portable.zip", 'SHA256SUMS.txt')
+          $taskAssets = @(Get-ChildItem -LiteralPath dist -File)
+          if ($taskAssets.Count -ne 3 -or (Compare-Object ($taskExpectedNames | Sort-Object) ($taskAssets.Name | Sort-Object))) {
+            throw 'Expected exactly the tagged MSI, portable ZIP and SHA256SUMS.txt.'
           }
+          $taskReleaseJson = gh release view $env:RELEASE_TAG --repo $env:GH_REPO --json isDraft,assets 2>$null
+          $taskViewExitCode = $LASTEXITCODE
+          $taskIsDraft = $false
+          $taskExistingNames = @()
+          if ($taskViewExitCode -eq 0) {
+            $taskRelease = $taskReleaseJson | ConvertFrom-Json -ErrorAction Stop
+            if ($taskRelease.isDraft -isnot [bool]) { throw 'GitHub release draft status is invalid.' }
+            $taskIsDraft = $taskRelease.isDraft
+            $taskExistingNames = @($taskRelease.assets | ForEach-Object name)
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:GH_REPO --verify-tag --title "SystemMonitorX $env:RELEASE_TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "GitHub release creation failed (exit $LASTEXITCODE)." }
+          }
+          $taskPreserved = 0
           foreach ($taskAsset in $taskAssets) {
-            gh release upload $env:RELEASE_TAG $taskAsset --repo $env:GH_REPO --clobber
-            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed: $taskAsset" }
+            # Published package bytes are stable even when rebuilding the same
+            # commit changes PE timestamps or WiX-generated package identities.
+            if (-not $taskIsDraft -and $taskAsset.Name -in $taskExistingNames) {
+              Write-Host "Preserved published release asset: $($taskAsset.Name)"
+              $taskPreserved++
+              continue
+            }
+            $taskUploadArgs = @('release', 'upload', $env:RELEASE_TAG, $taskAsset.FullName, '--repo', $env:GH_REPO)
+            if ($taskIsDraft) { $taskUploadArgs += '--clobber' }
+            gh @taskUploadArgs
+            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed: $($taskAsset.Name) (exit $LASTEXITCODE)." }
+          }
+          if (-not $taskIsDraft -and $taskPreserved -eq 3) {
+            Write-Host "Preserved all three published assets for $env:RELEASE_TAG; no uploads were performed."
           }

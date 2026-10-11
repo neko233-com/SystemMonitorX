@@ -37,6 +37,15 @@
             <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
             <RemoveFolder Id="RemoveUserProgramsFolder" Directory="UserProgramsFolder" On="uninstall" />
           </Component>
+          <Component Id="UpdaterFiles" Guid="{58A1C636-5115-4405-BF48-763B9D2B0462}"
+                     Bitness="always64">
+            <File Id="UpdaterExecutable" Source="$(var.PayloadDir)/SystemMonitorXUpdate.exe" />
+            <!-- The detached helper restarts the installed copy, including when
+                 an update was initiated by a portable copy of the application. -->
+            <RegistryValue Id="RegistryInstallPath" Root="HKCU"
+                           Key="Software\neko233-com\SystemMonitorX" Name="InstallPath"
+                           Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+          </Component>
         </Directory>
       </Directory>
     </StandardDirectory>
@@ -56,6 +65,7 @@
 
     <Feature Id="Complete" Title="SystemMonitorX" Level="1">
       <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="UpdaterFiles" />
       <ComponentRef Id="StartMenuShortcuts" />
       <?ifdef IncludeRuntime ?>
       <ComponentGroupRef Id="RuntimeFiles" />

@@ -14,6 +14,12 @@ use sysinfo::{
 };
 
 use crate::gpu::{GpuMonitor, GpuSample};
+use crate::network_process::ProcessNetworkMonitor;
+use crate::performance::{
+    AppHistorySample, HistoryStore, ProcessHistorySample, ProcessPerformanceCollector,
+    system_performance,
+};
+use crate::sessions::{SessionSample, enumerate_sessions, summarize_sessions};
 
 #[derive(Clone, Debug, Default)]
 pub struct CpuSample {
@@ -32,6 +38,15 @@ pub struct ProcessSample {
     pub cpu_usage: f32,
     pub memory_bytes: u64,
     pub virtual_memory_bytes: u64,
+    pub working_set_bytes: Option<u64>,
+    pub private_bytes: Option<u64>,
+    pub private_working_set_bytes: Option<u64>,
+    pub cpu_time_seconds: Option<f64>,
+    pub cpu_time_ticks: Option<u64>,
+    pub thread_count: Option<u32>,
+    pub handle_count: Option<u32>,
+    pub session_id: Option<u32>,
+    pub user_name: Option<String>,
     pub disk_read_bytes_per_sec: Option<f64>,
     pub disk_write_bytes_per_sec: Option<f64>,
     pub total_disk_read_bytes: Option<u64>,
@@ -44,6 +59,8 @@ pub struct ProcessSample {
     pub run_time_secs: u64,
     /// Together with `pid`, this identifies a process even when Windows reuses PIDs.
     pub start_time_unix_secs: u64,
+    /// Exact native identity for mutations; avoids precision loss from Unix seconds.
+    pub start_time_windows_ticks: Option<u64>,
     pub exe: Option<PathBuf>,
     pub status: String,
 }
@@ -127,6 +144,24 @@ pub struct SystemSnapshot {
     pub gpu_note: Option<String>,
     pub io_note: Option<String>,
     pub network_note: Option<String>,
+    pub process_network_available: bool,
+    pub process_network_status: String,
+    pub process_network_dropped_events: Option<u64>,
+    pub system_handle_count: Option<u32>,
+    pub system_thread_count: Option<u32>,
+    pub system_process_count: Option<u32>,
+    pub committed_bytes: Option<u64>,
+    pub commit_limit_bytes: Option<u64>,
+    pub commit_peak_bytes: Option<u64>,
+    pub cached_memory_bytes: Option<u64>,
+    pub kernel_paged_bytes: Option<u64>,
+    pub kernel_nonpaged_bytes: Option<u64>,
+    pub collector_duration_ms: f64,
+    pub process_collection_note: Option<String>,
+    pub sessions: Vec<SessionSample>,
+    pub sessions_note: Option<String>,
+    pub app_history: Vec<AppHistorySample>,
+    pub history_note: Option<String>,
 }
 
 impl Default for SystemSnapshot {
@@ -167,6 +202,24 @@ impl Default for SystemSnapshot {
             gpu_note: None,
             io_note: None,
             network_note: None,
+            process_network_available: false,
+            process_network_status: String::new(),
+            process_network_dropped_events: None,
+            system_handle_count: None,
+            system_thread_count: None,
+            system_process_count: None,
+            committed_bytes: None,
+            commit_limit_bytes: None,
+            commit_peak_bytes: None,
+            cached_memory_bytes: None,
+            kernel_paged_bytes: None,
+            kernel_nonpaged_bytes: None,
+            collector_duration_ms: 0.0,
+            process_collection_note: None,
+            sessions: Vec::new(),
+            sessions_note: None,
+            app_history: Vec::new(),
+            history_note: None,
         }
     }
 }
@@ -202,6 +255,12 @@ struct IoBaseline {
     sampled_at: Instant,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CpuBaseline {
+    ticks: u64,
+    sampled_at: Instant,
+}
+
 #[derive(Clone, Debug)]
 struct DiskCounters {
     id: String,
@@ -229,8 +288,12 @@ pub struct Monitor {
     networks: Networks,
     components: Components,
     gpu: GpuMonitor,
-    process_baselines: HashMap<(u32, u64), IoBaseline>,
+    process_network: ProcessNetworkMonitor,
+    process_collector: ProcessPerformanceCollector,
+    process_baselines: HashMap<(u32, u64, u64), IoBaseline>,
+    process_cpu_baselines: HashMap<(u32, u64, u64), CpuBaseline>,
     disk_baselines: HashMap<String, DiskBaseline>,
+    disk_devices: HashMap<String, DiskDevice>,
     network_baselines: HashMap<(String, String), IoBaseline>,
     cpu_primed_at: Instant,
     slow_refresh_at: Instant,
@@ -241,6 +304,10 @@ pub struct Monitor {
     kernel_version: String,
     architecture: String,
     physical_cores: Option<usize>,
+    sessions: Vec<SessionSample>,
+    sessions_note: Option<String>,
+    history: HistoryStore,
+    app_history: Vec<AppHistorySample>,
 }
 
 impl Default for Monitor {
@@ -251,21 +318,53 @@ impl Default for Monitor {
 
 impl Monitor {
     pub fn new() -> Self {
+        Self::with_history(HistoryStore::open_default())
+    }
+
+    /// Diagnostic collectors keep benchmark/test processes out of saved user history.
+    pub fn new_in_memory() -> Self {
+        Self::with_history(HistoryStore::open(None))
+    }
+
+    fn with_history(history: HistoryStore) -> Self {
         let mut system = System::new();
         system.refresh_cpu_specifics(CpuRefreshKind::everything());
         let cpu_primed_at = Instant::now();
         system.refresh_memory();
-        system.refresh_processes_specifics(ProcessesToUpdate::All, true, process_refresh_kind());
-        let process_baselines = system
-            .processes()
+        let mut process_collector = ProcessPerformanceCollector::default();
+        let raw_processes = process_collector.sample().unwrap_or_default();
+        let process_baselines = raw_processes
             .iter()
-            .filter_map(|(pid, process)| {
-                let counters = process_io_counters(pid.as_u32())?;
+            .filter_map(|process| {
+                let counters = IoCounters {
+                    read: process.read_bytes?,
+                    written: process.write_bytes?,
+                };
                 Some((
-                    (pid.as_u32(), process.start_time()),
+                    (
+                        process.pid,
+                        process.start_time_unix_secs,
+                        process.start_time_windows_ticks.unwrap_or(0),
+                    ),
                     IoBaseline {
                         counters,
-                        sampled_at: Instant::now(),
+                        sampled_at: process_collector.sampled_at(),
+                    },
+                ))
+            })
+            .collect();
+        let process_cpu_baselines = raw_processes
+            .iter()
+            .filter_map(|process| {
+                Some((
+                    (
+                        process.pid,
+                        process.start_time_unix_secs,
+                        process.start_time_windows_ticks.unwrap_or(0),
+                    ),
+                    CpuBaseline {
+                        ticks: process.cpu_ticks?,
+                        sampled_at: process_collector.sampled_at(),
                     },
                 ))
             })
@@ -275,10 +374,11 @@ impl Monitor {
         let disks = Disks::new_with_refreshed_list_specifics(
             DiskRefreshKind::nothing().with_storage().with_kind(),
         );
+        let mut disk_devices = HashMap::new();
         let disk_baselines = disks
             .iter()
             .filter_map(|disk| {
-                let counters = disk_io_counters(disk.mount_point())?;
+                let counters = disk_io_counters(disk.mount_point(), &mut disk_devices)?;
                 Some((
                     disk.mount_point().to_string_lossy().into_owned(),
                     DiskBaseline {
@@ -305,6 +405,10 @@ impl Monitor {
             })
             .collect();
         let components = Components::new_with_refreshed_list();
+        let (sessions, sessions_note) = match enumerate_sessions() {
+            Ok(sessions) => (sessions, None),
+            Err(error) => (Vec::new(), Some(format!("用户会话无法读取：{error:#}"))),
+        };
         let now = Instant::now();
 
         Self {
@@ -313,8 +417,12 @@ impl Monitor {
             networks,
             components,
             gpu: GpuMonitor::new(),
+            process_network: ProcessNetworkMonitor::new(),
+            process_collector,
             process_baselines,
+            process_cpu_baselines,
             disk_baselines,
+            disk_devices,
             network_baselines,
             cpu_primed_at,
             slow_refresh_at: now,
@@ -327,22 +435,35 @@ impl Monitor {
             kernel_version: System::kernel_version().unwrap_or_else(|| "未知".into()),
             architecture: System::cpu_arch(),
             physical_cores: System::physical_core_count(),
+            sessions,
+            sessions_note,
+            history,
+            app_history: Vec::new(),
         }
     }
 
     pub fn sample(&mut self) -> SystemSnapshot {
+        let collector_started = Instant::now();
         let cpu_ready = self.cpu_primed_at.elapsed() >= sysinfo::MINIMUM_CPU_UPDATE_INTERVAL;
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            process_refresh_kind(),
-        );
         let slow_refresh = self.slow_refresh_at.elapsed() >= Duration::from_secs(5);
         if slow_refresh {
             self.system.refresh_cpu_frequency();
             self.components.refresh(true);
+            self.disks
+                .refresh_specifics(true, DiskRefreshKind::nothing().with_storage().with_kind());
+            // Re-resolve identities during hotplug scans, not every sample.
+            self.disk_devices.clear();
+            match enumerate_sessions() {
+                Ok(sessions) => {
+                    self.sessions = sessions;
+                    self.sessions_note = None;
+                }
+                Err(error) => {
+                    self.sessions_note = Some(format!("用户会话暂时无法刷新：{error:#}"));
+                }
+            }
             self.slow_refresh_at = Instant::now();
         }
 
@@ -376,56 +497,176 @@ impl Monitor {
         let gpu_usage = self.gpu.process_usage();
         let gpu_memory = self.gpu.process_memory();
 
-        let mut next_process_baselines = HashMap::with_capacity(self.system.processes().len());
-        let mut processes: Vec<_> = self
-            .system
-            .processes()
-            .iter()
-            .map(|(pid, process)| {
-                let pid = pid.as_u32();
-                let key = (pid, process.start_time());
-                let current_io = process_io_counters(pid);
-                let now = Instant::now();
-                let (read_rate, write_rate) =
-                    io_rates(current_io, self.process_baselines.get(&key).copied(), now);
-                if let Some(counters) = current_io {
-                    next_process_baselines.insert(
-                        key,
-                        IoBaseline {
-                            counters,
-                            sampled_at: now,
-                        },
-                    );
-                }
-
-                ProcessSample {
-                    pid,
-                    parent_pid: process.parent().map(|parent| parent.as_u32()),
-                    name: process.name().to_string_lossy().into_owned(),
-                    cpu_usage: normalize_process_cpu(process.cpu_usage(), logical_cpus),
-                    memory_bytes: process.memory(),
-                    virtual_memory_bytes: process.virtual_memory(),
-                    disk_read_bytes_per_sec: read_rate,
-                    disk_write_bytes_per_sec: write_rate,
-                    total_disk_read_bytes: current_io.map(|io| io.read),
-                    total_disk_write_bytes: current_io.map(|io| io.written),
-                    gpu_usage: gpu_usage
-                        .get(&pid)
-                        .copied()
-                        .filter(|value| value.is_finite()),
-                    gpu_memory_bytes: gpu_memory.get(&pid).copied(),
-                    network_received_bytes_per_sec: None,
-                    network_transmitted_bytes_per_sec: None,
-                    run_time_secs: process.run_time(),
-                    start_time_unix_secs: process.start_time(),
-                    exe: process
-                        .exe()
-                        .filter(|path| !path.as_os_str().is_empty())
-                        .map(PathBuf::from),
-                    status: process.status().to_string(),
-                }
-            })
-            .collect();
+        let process_result = self.process_collector.sample();
+        let process_time = self.process_collector.sampled_at();
+        let mut next_process_baselines = HashMap::new();
+        let mut next_cpu_baselines = HashMap::new();
+        let process_collection_note;
+        let mut processes: Vec<_> = match process_result {
+            Ok(raw_processes) => {
+                process_collection_note = None;
+                let unix_now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|time| time.as_secs())
+                    .unwrap_or(0);
+                raw_processes
+                    .into_iter()
+                    .map(|process| {
+                        let key = (
+                            process.pid,
+                            process.start_time_unix_secs,
+                            process.start_time_windows_ticks.unwrap_or(0),
+                        );
+                        let current_io = process
+                            .read_bytes
+                            .zip(process.write_bytes)
+                            .map(|(read, written)| IoCounters { read, written });
+                        let (read_rate, write_rate) = io_rates(
+                            current_io,
+                            self.process_baselines.get(&key).copied(),
+                            process_time,
+                        );
+                        if let Some(counters) = current_io {
+                            next_process_baselines.insert(
+                                key,
+                                IoBaseline {
+                                    counters,
+                                    sampled_at: process_time,
+                                },
+                            );
+                        }
+                        let usage = process
+                            .cpu_ticks
+                            .zip(self.process_cpu_baselines.get(&key))
+                            .and_then(|(ticks, previous)| {
+                                let elapsed = process_time
+                                    .checked_duration_since(previous.sampled_at)?
+                                    .as_secs_f64();
+                                counter_rate(ticks, previous.ticks, elapsed).map(
+                                    |ticks_per_second| {
+                                        finite_percent(
+                                            (ticks_per_second
+                                                / 10_000_000.0
+                                                / logical_cpus.max(1) as f64
+                                                * 100.0)
+                                                as f32,
+                                        )
+                                    },
+                                )
+                            });
+                        if let Some(ticks) = process.cpu_ticks {
+                            next_cpu_baselines.insert(
+                                key,
+                                CpuBaseline {
+                                    ticks,
+                                    sampled_at: process_time,
+                                },
+                            );
+                        }
+                        ProcessSample {
+                            pid: process.pid,
+                            parent_pid: process.parent_pid,
+                            name: process.name,
+                            // The idle pseudo-process is not application CPU consumption.
+                            cpu_usage: if process.pid == 0 {
+                                0.0
+                            } else {
+                                usage.unwrap_or(0.0)
+                            },
+                            memory_bytes: process.working_set_bytes.unwrap_or(0),
+                            virtual_memory_bytes: process.virtual_bytes.unwrap_or(0),
+                            working_set_bytes: process.working_set_bytes,
+                            private_bytes: process.private_bytes,
+                            private_working_set_bytes: process.private_working_set_bytes,
+                            cpu_time_seconds: process
+                                .cpu_ticks
+                                .map(|ticks| ticks as f64 / 10_000_000.0),
+                            cpu_time_ticks: process.cpu_ticks,
+                            thread_count: process.thread_count,
+                            handle_count: process.handle_count,
+                            session_id: process.session_id,
+                            user_name: process.user_name,
+                            disk_read_bytes_per_sec: read_rate,
+                            disk_write_bytes_per_sec: write_rate,
+                            total_disk_read_bytes: process.read_bytes,
+                            total_disk_write_bytes: process.write_bytes,
+                            gpu_usage: gpu_usage
+                                .get(&process.pid)
+                                .copied()
+                                .filter(|value| value.is_finite()),
+                            gpu_memory_bytes: gpu_memory.get(&process.pid).copied(),
+                            run_time_secs: if process.start_time_unix_secs > 0 {
+                                unix_now.saturating_sub(process.start_time_unix_secs)
+                            } else {
+                                0
+                            },
+                            start_time_unix_secs: process.start_time_unix_secs,
+                            start_time_windows_ticks: process.start_time_windows_ticks,
+                            exe: process.exe,
+                            status: if process.pid == 0 {
+                                "系统空闲".into()
+                            } else {
+                                process.status.unwrap_or_else(|| "状态不可用".into())
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .collect()
+            }
+            Err(error) => {
+                // Native layouts are not a stable public Win32 contract. Preserve
+                // supported sysinfo collection if a future Windows query rejects it.
+                process_collection_note =
+                    Some(format!("使用兼容进程采集，部分详情不可用：{error:#}"));
+                self.system.refresh_processes_specifics(
+                    ProcessesToUpdate::All,
+                    true,
+                    process_refresh_kind(),
+                );
+                self.system
+                    .processes()
+                    .iter()
+                    .map(|(pid, process)| {
+                        let pid = pid.as_u32();
+                        let key = (pid, process.start_time(), 0);
+                        let io = process_io_counters(pid);
+                        let (read, written) =
+                            io_rates(io, self.process_baselines.get(&key).copied(), process_time);
+                        if let Some(counters) = io {
+                            next_process_baselines.insert(
+                                key,
+                                IoBaseline {
+                                    counters,
+                                    sampled_at: process_time,
+                                },
+                            );
+                        }
+                        ProcessSample {
+                            pid,
+                            parent_pid: process.parent().map(|parent| parent.as_u32()),
+                            name: process.name().to_string_lossy().into_owned(),
+                            cpu_usage: normalize_process_cpu(process.cpu_usage(), logical_cpus),
+                            memory_bytes: process.memory(),
+                            virtual_memory_bytes: process.virtual_memory(),
+                            disk_read_bytes_per_sec: read,
+                            disk_write_bytes_per_sec: written,
+                            total_disk_read_bytes: io.map(|io| io.read),
+                            total_disk_write_bytes: io.map(|io| io.written),
+                            gpu_usage: gpu_usage.get(&pid).copied(),
+                            gpu_memory_bytes: gpu_memory.get(&pid).copied(),
+                            run_time_secs: process.run_time(),
+                            start_time_unix_secs: process.start_time(),
+                            exe: process
+                                .exe()
+                                .filter(|path| !path.as_os_str().is_empty())
+                                .map(PathBuf::from),
+                            status: process.status().to_string(),
+                            ..Default::default()
+                        }
+                    })
+                    .collect()
+            }
+        };
         // Stable tie-breakers keep equal-usage processes from jumping every refresh.
         processes.sort_by(|left, right| {
             right
@@ -435,16 +676,33 @@ impl Monitor {
                 .then_with(|| left.pid.cmp(&right.pid))
         });
         self.process_baselines = next_process_baselines;
-
-        self.disks
-            .refresh_specifics(true, DiskRefreshKind::nothing().with_storage().with_kind());
+        self.process_cpu_baselines = next_cpu_baselines;
+        let process_identities: Vec<_> = processes
+            .iter()
+            .filter_map(|process| Some((process.pid, process.start_time_windows_ticks?)))
+            .collect();
+        let process_network = self.process_network.sample(&process_identities);
+        for process in &mut processes {
+            if let Some(rate) = process_network.rates.get(&process.pid).filter(|rate| {
+                process.start_time_windows_ticks == Some(rate.process_start_time_windows_ticks)
+            }) {
+                process.network_received_bytes_per_sec = Some(rate.received_bytes_per_sec);
+                process.network_transmitted_bytes_per_sec = Some(rate.sent_bytes_per_sec);
+            }
+        }
+        summarize_sessions(&mut self.sessions, &processes);
+        self.history.update(&processes);
+        self.history.observe_network(&process_network);
+        if slow_refresh || self.app_history.is_empty() {
+            self.app_history = self.history.app_history();
+        }
         let mut next_disk_baselines = HashMap::new();
         let mut disks: Vec<_> = self
             .disks
             .iter()
             .map(|disk| {
                 let mount_point = disk.mount_point().to_string_lossy().into_owned();
-                let counters = disk_io_counters(disk.mount_point());
+                let counters = disk_io_counters(disk.mount_point(), &mut self.disk_devices);
                 let now = Instant::now();
                 let previous = self.disk_baselines.get(&mount_point);
                 // A drive letter can be reused for another volume after hotplug.
@@ -610,6 +868,7 @@ impl Monitor {
         let now = Instant::now();
         let sample_interval_secs = now.duration_since(self.previous_snapshot_at).as_secs_f64();
         self.previous_snapshot_at = now;
+        let performance = system_performance();
 
         SystemSnapshot {
             sampled_at: SystemTime::now(),
@@ -651,10 +910,53 @@ impl Monitor {
             temperature_note,
             gpu_note,
             io_note,
-            network_note: Some(
-                "显示 Windows 提供的活动网络适配器；逐进程网络速率暂不可用。".into(),
-            ),
+            network_note: Some(format!(
+                "显示 Windows 提供的活动网络适配器；{}",
+                process_network.status
+            )),
+            process_network_available: process_network.available,
+            process_network_dropped_events: if process_network.available
+                || process_network.dropped_events > 0
+            {
+                Some(process_network.dropped_events)
+            } else {
+                None
+            },
+            process_network_status: process_network.status,
+            system_handle_count: performance.handle_count,
+            system_thread_count: performance.thread_count,
+            system_process_count: performance.process_count,
+            committed_bytes: performance.committed_bytes,
+            commit_limit_bytes: performance.commit_limit_bytes,
+            commit_peak_bytes: performance.commit_peak_bytes,
+            cached_memory_bytes: performance.cached_memory_bytes,
+            kernel_paged_bytes: performance.kernel_paged_bytes,
+            kernel_nonpaged_bytes: performance.kernel_nonpaged_bytes,
+            collector_duration_ms: collector_started.elapsed().as_secs_f64() * 1000.0,
+            process_collection_note,
+            sessions: self.sessions.clone(),
+            sessions_note: self.sessions_note.clone(),
+            app_history: self.app_history.clone(),
+            history_note: Some(format!(
+                "仅统计已观察进程；不含采样间隔内启动并退出的进程。最多保留 2048 个进程实例。{} {}",
+                self.history.note.as_deref().unwrap_or_default(),
+                self.history
+                    .network_note
+                    .as_deref()
+                    .unwrap_or("网络历史尚无完整有效的 ETW 采样周期。"),
+            )),
         }
+    }
+
+    pub fn process_history(&self) -> Vec<ProcessHistorySample> {
+        self.history.process_history()
+    }
+
+    /// Call only in response to an explicit reset action on the collector thread.
+    pub fn reset_history(&mut self) -> anyhow::Result<()> {
+        self.history.reset()?;
+        self.app_history.clear();
+        Ok(())
     }
 }
 
@@ -795,14 +1097,38 @@ impl Drop for NativeHandle {
 }
 
 #[cfg(windows)]
-fn disk_io_counters(mount_point: &std::path::Path) -> Option<DiskCounters> {
+struct DiskDevice {
+    id: String,
+    handle: NativeHandle,
+}
+
+#[cfg(not(windows))]
+struct DiskDevice;
+
+#[cfg(windows)]
+fn disk_io_counters(
+    mount_point: &std::path::Path,
+    devices: &mut HashMap<String, DiskDevice>,
+) -> Option<DiskCounters> {
+    let key = mount_point.to_string_lossy().into_owned();
+    if !devices.contains_key(&key) {
+        devices.insert(key.clone(), open_disk_device(mount_point)?);
+    }
+    let result = read_disk_device(devices.get(&key)?);
+    if result.is_none() {
+        // A removed device must be reopened and verified on the next sample.
+        devices.remove(&key);
+    }
+    result
+}
+
+#[cfg(windows)]
+fn open_disk_device(mount_point: &std::path::Path) -> Option<DiskDevice> {
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeNameForVolumeMountPointW,
-        OPEN_EXISTING,
+        CreateFileW, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        GetVolumeNameForVolumeMountPointW, OPEN_EXISTING,
     };
-    use windows::Win32::System::IO::DeviceIoControl;
-    use windows::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
     use windows::core::PCWSTR;
 
     let mount: Vec<u16> = mount_point.as_os_str().encode_wide().chain([0]).collect();
@@ -823,7 +1149,7 @@ fn disk_io_counters(mount_point: &std::path::Path) -> Option<DiskCounters> {
             CreateFileW(
                 PCWSTR(volume.as_ptr()),
                 0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 None,
                 OPEN_EXISTING,
                 Default::default(),
@@ -832,13 +1158,20 @@ fn disk_io_counters(mount_point: &std::path::Path) -> Option<DiskCounters> {
         }
         .ok()?,
     );
+    Some(DiskDevice { id, handle })
+}
+
+#[cfg(windows)]
+fn read_disk_device(device: &DiskDevice) -> Option<DiskCounters> {
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
     let mut counters = DISK_PERFORMANCE::default();
     let mut returned = 0;
     // SAFETY: this synchronous IOCTL accepts no input and the output buffer is a
     // properly aligned DISK_PERFORMANCE with its exact byte size.
     unsafe {
         DeviceIoControl(
-            handle.0,
+            device.handle.0,
             IOCTL_DISK_PERFORMANCE,
             None,
             0,
@@ -853,7 +1186,7 @@ fn disk_io_counters(mount_point: &std::path::Path) -> Option<DiskCounters> {
         return None;
     }
     Some(DiskCounters {
-        id,
+        id: device.id.clone(),
         io: IoCounters {
             read: counters.BytesRead.try_into().ok()?,
             written: counters.BytesWritten.try_into().ok()?,
@@ -874,7 +1207,10 @@ fn process_io_counters(_pid: u32) -> Option<IoCounters> {
 }
 
 #[cfg(not(windows))]
-fn disk_io_counters(_mount_point: &std::path::Path) -> Option<DiskCounters> {
+fn disk_io_counters(
+    _mount_point: &std::path::Path,
+    _devices: &mut HashMap<String, DiskDevice>,
+) -> Option<DiskCounters> {
     None
 }
 

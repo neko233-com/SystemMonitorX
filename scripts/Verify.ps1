@@ -3,11 +3,13 @@ param(
     [switch]$PackageOnly,
     [string]$MsiPath,
     [string]$Version,
-    [string]$PayloadDirectory
+    [string]$PayloadDirectory,
+    [string]$ZipPath
 )
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$taskRequiredPayloadFiles = @('SystemMonitorX.exe', 'SystemMonitorXUpdate.exe', 'LICENSE', 'README.md')
 
 function Assert-ExitCode([string]$Operation) {
     if ($LASTEXITCODE -ne 0) { throw "$Operation failed (exit $LASTEXITCODE)." }
@@ -40,9 +42,9 @@ try {
         . (Join-Path $PSScriptRoot 'Enter-DevEnvironment.ps1')
         & cargo fmt --all -- --check
         Assert-ExitCode 'Rust formatting'
-        & cargo clippy --all-targets --locked -- -D warnings
+        & cargo clippy --all-targets --locked --features ui-test -- -D warnings
         Assert-ExitCode 'Clippy'
-        & cargo test --all-targets --locked
+        & cargo test --all-targets --locked --features ui-test
         Assert-ExitCode 'Rust tests'
         & cargo build --release --locked
         Assert-ExitCode 'Release build'
@@ -63,6 +65,11 @@ try {
         if (-not $Version) { throw 'Version is required when verifying an MSI.' }
         if (-not $PayloadDirectory) { throw 'PayloadDirectory is required when verifying an MSI.' }
         $taskPayload = (Resolve-Path -LiteralPath $PayloadDirectory).Path
+        foreach ($taskRequired in $taskRequiredPayloadFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $taskPayload $taskRequired) -PathType Leaf)) {
+                throw "Required package payload input is missing: $taskRequired."
+            }
+        }
         # ICE91 describes per-machine use of per-user directories. This package
         # deliberately has a fixed per-user scope, verified below.
         & wix msi validate $taskMsi -sice ICE91
@@ -89,8 +96,26 @@ try {
                 throw 'MSI destination must be LocalAppData/Programs/SystemMonitorX.'
             }
             $taskFiles = @(Read-MsiRows $taskDatabase 'SELECT `FileName` FROM `File`' 1 | ForEach-Object { ($_[0] -split '\|')[-1] })
-            foreach ($taskRequired in @('SystemMonitorX.exe', 'LICENSE', 'README.md')) {
+            foreach ($taskRequired in $taskRequiredPayloadFiles) {
                 if ($taskRequired -notin $taskFiles) { throw "MSI is missing $taskRequired." }
+            }
+
+            $taskUpdaterComponents = @(Read-MsiRows $taskDatabase "SELECT ``ComponentId``, ``Directory_``, ``Attributes``, ``KeyPath`` FROM ``Component`` WHERE ``Component`` = 'UpdaterFiles'" 4)
+            if ($taskUpdaterComponents.Count -ne 1 -or $taskUpdaterComponents[0][0] -ne '{58A1C636-5115-4405-BF48-763B9D2B0462}' -or $taskUpdaterComponents[0][1] -ne 'INSTALLFOLDER' -or $taskUpdaterComponents[0][3] -ne 'RegistryInstallPath') {
+                throw 'MSI detached updater component must have its stable identity, installation directory and registry key path.'
+            }
+            $taskUpdaterAttributes = [int]$taskUpdaterComponents[0][2]
+            # msidbComponentAttributes64bit=256, RegistryKeyPath=4.
+            if (($taskUpdaterAttributes -band 256) -eq 0 -or ($taskUpdaterAttributes -band 4) -eq 0) {
+                throw 'MSI updater component must use the native 64-bit registry view and a registry key path.'
+            }
+            $taskUpdaterFiles = @(Read-MsiRows $taskDatabase "SELECT ``Component_``, ``FileName`` FROM ``File`` WHERE ``File`` = 'UpdaterExecutable'" 2)
+            if ($taskUpdaterFiles.Count -ne 1 -or $taskUpdaterFiles[0][0] -ne 'UpdaterFiles' -or ($taskUpdaterFiles[0][1] -split '\|')[-1] -ne 'SystemMonitorXUpdate.exe') {
+                throw 'MSI updater executable must belong to the independent updater component.'
+            }
+            $taskInstallPathRows = @(Read-MsiRows $taskDatabase "SELECT ``Root``, ``Key``, ``Name``, ``Value``, ``Component_`` FROM ``Registry`` WHERE ``Registry`` = 'RegistryInstallPath'" 5)
+            if ($taskInstallPathRows.Count -ne 1 -or $taskInstallPathRows[0][0] -ne '1' -or $taskInstallPathRows[0][1] -ne 'Software\neko233-com\SystemMonitorX' -or $taskInstallPathRows[0][2] -ne 'InstallPath' -or $taskInstallPathRows[0][3] -ne '[INSTALLFOLDER]' -or $taskInstallPathRows[0][4] -ne 'UpdaterFiles') {
+                throw 'MSI RegistryInstallPath must write HKCU64 Software\neko233-com\SystemMonitorX InstallPath as REG_SZ [INSTALLFOLDER].'
             }
             $taskShortcuts = @(Read-MsiRows $taskDatabase 'SELECT `Shortcut`, `Target` FROM `Shortcut`' 2)
             if (-not ($taskShortcuts | Where-Object { $_[0] -eq 'LaunchShortcut' -and $_[1] -eq '[#MainExecutable]' })) { throw 'MSI launch shortcut is missing or invalid.' }
@@ -178,7 +203,7 @@ try {
                     throw "MSI extraction hash mismatch: $($taskFile.Name)."
                 }
             }
-            Write-Host 'MSI properties, shortcuts, per-user destination and all extracted payload hashes passed.'
+            Write-Host 'MSI properties, shortcuts, per-user destination, detached updater, HKCU64 InstallPath and all extracted payload hashes passed.'
         } finally {
             $taskResolvedExtract = [IO.Path]::GetFullPath($taskExtract)
             if (-not $taskResolvedExtract.StartsWith($taskTempRoot, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path $taskResolvedExtract -Leaf) -notlike 'SystemMonitorX-verify-*') {
@@ -188,6 +213,44 @@ try {
         }
     } elseif ($PackageOnly) {
         throw 'PackageOnly requires MsiPath.'
+    }
+
+
+    if ($ZipPath) {
+        if (-not $PayloadDirectory) { throw 'PayloadDirectory is required when verifying a portable ZIP.' }
+        $taskPayload = (Resolve-Path -LiteralPath $PayloadDirectory).Path
+        $taskZip = (Resolve-Path -LiteralPath $ZipPath).Path
+        $taskArchive = [IO.Compression.ZipFile]::OpenRead($taskZip)
+        try {
+            $taskZipEntries = @($taskArchive.Entries | ForEach-Object FullName | Sort-Object)
+            $taskExpectedEntries = @(Get-ChildItem -LiteralPath $taskPayload -File | ForEach-Object Name | Sort-Object)
+            foreach ($taskRequired in $taskRequiredPayloadFiles) {
+                if ($taskRequired -notin $taskZipEntries -or $taskRequired -notin $taskExpectedEntries) {
+                    throw "Portable ZIP or source payload is missing $taskRequired."
+                }
+            }
+            if (Compare-Object $taskExpectedEntries $taskZipEntries) {
+                throw 'Portable ZIP contents do not match the verified payload.'
+            }
+            foreach ($taskEntry in $taskArchive.Entries) {
+                $taskPayloadFile = Join-Path $taskPayload $taskEntry.FullName
+                if ($taskEntry.Length -ne (Get-Item -LiteralPath $taskPayloadFile).Length) {
+                    throw "Portable ZIP length mismatch: $($taskEntry.FullName)."
+                }
+                $taskEntryStream = $taskEntry.Open()
+                try {
+                    $taskZipHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($taskEntryStream))
+                } finally {
+                    $taskEntryStream.Dispose()
+                }
+                if ($taskZipHash -ne (Get-FileHash -LiteralPath $taskPayloadFile -Algorithm SHA256).Hash) {
+                    throw "Portable ZIP hash mismatch: $($taskEntry.FullName)."
+                }
+            }
+            Write-Host 'Portable ZIP includes the application and detached updater; exact contents, lengths and all payload hashes passed.'
+        } finally {
+            $taskArchive.Dispose()
+        }
     }
 } finally {
     Pop-Location
