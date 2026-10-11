@@ -32,10 +32,10 @@ jobs:
           toolchain: 1.96.0
           components: rustfmt, clippy
           targets: x86_64-pc-windows-msvc
-      - name: Install WiX 7
+      - name: Install WiX 5.0.2
         run: |
-          $taskWixPath = Join-Path $env:RUNNER_TEMP 'wix7'
-          dotnet tool install --tool-path $taskWixPath wix --version 7.0.0
+          $taskWixPath = Join-Path $env:RUNNER_TEMP 'wix5'
+          dotnet tool install --tool-path $taskWixPath wix --version 5.0.2 --allow-roll-forward
           if ($LASTEXITCODE -ne 0) { throw 'WiX installation failed.' }
           $taskWixPath | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Check formatting, Clippy, tests and real Windows telemetry
@@ -84,9 +84,11 @@ jobs:
           $taskAssets = @(Get-ChildItem -LiteralPath dist -File | ForEach-Object FullName)
           if ($taskAssets.Count -ne 3) { throw 'Expected MSI, portable ZIP and SHA256SUMS.txt.' }
           gh release view $env:RELEASE_TAG --repo $env:GH_REPO *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG @taskAssets --repo $env:GH_REPO --clobber
-          } else {
-            gh release create $env:RELEASE_TAG @taskAssets --repo $env:GH_REPO --verify-tag --title "SystemMonitorX $env:RELEASE_TAG" --generate-notes
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --repo $env:GH_REPO --verify-tag --title "SystemMonitorX $env:RELEASE_TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
           }
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }
+          foreach ($taskAsset in $taskAssets) {
+            gh release upload $env:RELEASE_TAG $taskAsset --repo $env:GH_REPO --clobber
+            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed: $taskAsset" }
+          }

@@ -22,9 +22,9 @@ try {
         & cargo build --release --locked
         if ($LASTEXITCODE -ne 0) { throw "Release build failed (exit $LASTEXITCODE)." }
     }
-    if (-not (Get-Command wix -ErrorAction SilentlyContinue)) { throw 'Install WiX 7: dotnet tool install --global wix --version 7.0.0' }
+    if (-not (Get-Command wix -ErrorAction SilentlyContinue)) { throw 'Install WiX 5.0.2: dotnet tool install --global wix --version 5.0.2 --allow-roll-forward' }
     $taskWixVersion = (& wix --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $taskWixVersion -notmatch '^7\.') { throw "WiX 7 is required; found '$taskWixVersion'." }
+    if ($LASTEXITCODE -ne 0 -or $taskWixVersion -notmatch '^5\.0\.2(?:\+|$)') { throw "WiX 5.0.2 is required; found '$taskWixVersion'." }
     $taskExe = Join-Path $taskRoot 'target/release/SystemMonitorX.exe'
     foreach ($taskRequired in @($taskExe, (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md'), (Join-Path $taskRoot 'assets/app.ico'))) {
         if (-not (Test-Path -LiteralPath $taskRequired -PathType Leaf)) { throw "Required packaging input is missing: $taskRequired" }

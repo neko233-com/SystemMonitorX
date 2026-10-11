@@ -53,7 +53,7 @@ Windows 专用的原生任务管理器替代应用，使用 **Rust 2024 + Longbr
 
 ## 开发
 
-需要 Rust 1.96.0、Visual Studio 的 **使用 C++ 的桌面开发** 工作负载，以及 Windows 10/11 SDK。打包需要 .NET SDK 和 WiX 7。
+需要 Rust 1.96.0、Visual Studio 的 **使用 C++ 的桌面开发** 工作负载，以及 Windows 10/11 SDK。打包需要 .NET SDK 和 WiX 5.0.2。
 
 ```powershell
 . ./scripts/Enter-DevEnvironment.ps1
