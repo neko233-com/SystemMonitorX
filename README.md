@@ -6,7 +6,7 @@ v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进�
 
 ## 下载与安装
 
-在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 选择实际已发布的版本。v0.2.1 的目标发布包如下，以实际已发布资产为准：
+在 [Releases](https://github.com/neko233-com/SystemMonitorX/releases) 选择实际已发布的版本。v0.2.1 已公开发布 MSI、完整便携 ZIP 与校验值，公开下载的文件校验通过：
 
 - `SystemMonitorX-0.2.1-x64.msi`：当前用户安装，默认目录为 `%LOCALAPPDATA%\Programs\SystemMonitorX`，创建开始菜单快捷方式，支持升级和卸载。
 - `SystemMonitorX-0.2.1-x64-portable.zip`：完整解压后运行 `SystemMonitorX.exe`。
@@ -55,9 +55,11 @@ v0.2 增加 Native 进程计数、更多硬件与 DirectX 12 能力信息、进�
 
 安装成功后启动实际安装版；便携版的一键更新也会安装并启动当前用户安装版。取消或安装失败后重新打开原应用。助手缺失、验证失败或另一个窗口正在安装时，当前窗口保持打开并显示原因。安装结果保存在 `%LOCALAPPDATA%\SystemMonitorX\updates\last-install-result.json`，各次日志位于对应 helper 缓存目录。
 
-v0.2.0 的真实更新流程已完成下载、SHA-256 校验与安装助手交接，但 MSI 安装返回 1619，日志出现 SourceDir 1314；原因是文件 canonical 化后的 `\\?\` 扩展路径进入了 Windows Installer 命令行。v0.2.1 针对该路径兼容性问题修订，实际本机安装、升级/取消/失败恢复和重启仍待验证。
+v0.2.1 修复 canonical 化后的 `\\?\` 扩展路径进入 Windows Installer 命令行、导致 SourceDir 1314 和安装返回 1619 的问题。**已有 v0.2.0 的用户请下载 v0.2.1 MSI 安装一次**：旧版已复制的旧助手不会因下载新版 MSI 自动修复。
 
-v0.2.0 优化 release + `ui-test` 构建的 23 项原生 UI 检查已通过，响应测量见下文。助手源码测试、成功下载或成功交接不等于安装成功，状态见 [ROADMAP.md](ROADMAP.md) 和对应发布/构建记录。
+已验证的两条路径：修复后的 v0.2.1 优化 `ui-test` 构建完成公开 v0.2.0 的真实检查、下载、SHA-256 校验、Ready 状态原生安装点击、助手安装（返回 0）及自动启动正式 v0.2.0 安装版，其主程序与助手哈希匹配公开 ZIP；随后，校验过的公开 v0.2.1 MSI 直接从正式 v0.2.0 升级成功（返回 0），正式 v0.2.1 已启动。登记的每用户安装目录、主程序和助手的 0.2.1 版本及公开 ZIP 哈希、开始菜单快捷方式目标均核验通过。
+
+v0.2.1 自动发现新版（Newer）→下载→安装整套端到端尚未完成：该 QA 启动被策略阻止（blocked by policy），本轮采用公开 MSI 直接升级。取消/失败恢复、离线与多窗口等场景仍需回归。v0.2.0 的 23 项优化原生 UI 检查与响应测量见下文，详细状态见 [ROADMAP.md](ROADMAP.md)。
 
 ## 快捷键与本地数据
 
@@ -104,7 +106,7 @@ cargo run --bin monitor_probe -- --benchmark --output target/benchmark-report.js
 cargo run --release --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
 ```
 
-当前已有源码模块测试、部分本机后端验证和上述 v0.2.0 发布版原生 UI 检查与响应测量；v0.2.1 实际 MSI 安装/升级及长时性能仍需验证。本机管理员 ETW 的自有回环累计字节与清理已单独通过，每协议字节/丢失、长期负载和跨版本回归仍未完成；也没有对官方任务管理器的同条件性能基线。
+v0.2.1 格式与 Clippy 检查通过，源码测试 91 项通过、1 项默认忽略；上述 v0.2.0 原生 UI 及性能结果、修复版助手实测和公开 v0.2.1 MSI 升级分别保留验证范围。v0.2.0 云端 CI 已完成通过，v0.2.1 CI 在本次文档更新时仍在运行；取消/失败恢复、完整自动新版分支及长时性能仍需验证。本机管理员 ETW 的自有回环累计字节与清理已单独通过，每协议字节/丢失、长期负载和跨版本回归仍未完成；也没有对官方任务管理器的同条件性能基线。
 
 ## 项目结构
 

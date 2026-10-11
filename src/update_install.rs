@@ -1290,24 +1290,20 @@ mod tests {
 
     #[test]
     fn waits_only_for_owned_child_exact_creation_identity() {
-        let powershell = system_msiexec()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("WindowsPowerShell\\v1.0\\powershell.exe");
-        let mut child = Command::new(powershell)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Start-Sleep -Milliseconds 500",
-            ])
-            .stdin(Stdio::null())
+        let cmd = system_msiexec().unwrap().parent().unwrap().join("cmd.exe");
+        // Keep the child blocked on our owned stdin pipe until both identity
+        // checks complete; no interpreter cold-start duration is assumed.
+        let child = Command::new(cmd)
+            .args(["/D", "/Q", "/C", "set /p SystemMonitorXTestWait="])
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW.0)
             .spawn()
             .unwrap();
+        // An assertion failure still kills/reaps only this exact Child handle.
+        let mut pending = PendingHelper::new(child);
+        let child = pending.child_mut();
         let handle = OwnedHandle(
             unsafe {
                 OpenProcess(
@@ -1324,6 +1320,8 @@ mod tests {
             OriginalProcessExit::PidReused
         );
         assert!(wait_for_exact_process(child.id(), ticks, Duration::from_millis(0)).is_err());
+        // EOF releases the fixture deterministically, even on slow CI hosts.
+        drop(child.stdin.take());
         assert_eq!(
             wait_for_exact_process(child.id(), ticks, Duration::from_secs(10)).unwrap(),
             OriginalProcessExit::Exited
