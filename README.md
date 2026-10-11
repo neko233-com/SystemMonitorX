@@ -74,6 +74,12 @@ cargo run --bin monitor_probe -- --smoke --verify-operations --output target/smo
 
 GitHub Actions 在 Windows 上验证并上传 MSI/ZIP。推送 `v*` 标签时自动创建 GitHub Release；依赖版本由 `Cargo.lock` 锁定，动作固定到提交 SHA。
 
+可选的原生 UI 冒烟测试使用实际 Windows 窗口和 D3D11 渲染，检查搜索、暂停、导航、弹窗及最小尺寸。输出目录应放在仓库之外，截图可能包含本机进程信息：
+
+```powershell
+cargo run --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
+```
+
 ## 项目结构
 
 ```text

@@ -336,6 +336,9 @@ impl SystemMonitorApp {
     fn set_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
         self.search.update(cx, |s, cx| s.set_value("", window, cx));
+        // Programmatic InputState::set_value does not emit InputEvent::Change.
+        // Rebuild all tables explicitly so a query does not leak across pages.
+        self.filter(cx);
         cx.notify();
     }
     fn refresh_metadata(&mut self, cx: &mut Context<Self>) {
@@ -398,6 +401,25 @@ impl SystemMonitorApp {
                 .title("运行新任务")
                 .width(px(480.))
                 .child(Input::new(&input))
+                .footer(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("task-cancel")
+                                .label("取消")
+                                .on_click(|_, w, cx| w.close_dialog(cx)),
+                        )
+                        .child(Button::new("task-run").primary().label("运行").on_click({
+                            let input = input.clone();
+                            let view = view.clone();
+                            move |_, w, cx| {
+                                if Self::submit_task(&input, &view, cx) {
+                                    w.close_dialog(cx);
+                                }
+                            }
+                        })),
+                )
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text("运行")
@@ -407,32 +429,33 @@ impl SystemMonitorApp {
                 .on_ok({
                     let input = input.clone();
                     let view = view.clone();
-                    move |_, _, cx| {
-                        let command = input.read(cx).value().to_string();
-                        let result = platform::launch_task(&command);
-                        let success = result.is_ok();
-                        let _ = view.update(cx, |this, cx| {
-                            this.message = Some(match result {
-                                Ok(()) => "任务已启动".into(),
-                                Err(e) => format!("启动失败：{e:#}"),
-                            });
-                            cx.notify();
-                        });
-                        success
-                    }
+                    move |_, _, cx| Self::submit_task(&input, &view, cx)
                 })
         });
+    }
+    fn submit_task(input: &Entity<InputState>, view: &WeakEntity<Self>, cx: &mut App) -> bool {
+        let command = input.read(cx).value().to_string();
+        let result = platform::launch_task(&command);
+        let success = result.is_ok();
+        let _ = view.update(cx, |this, cx| {
+            this.message = Some(match result {
+                Ok(()) => "任务已启动".into(),
+                Err(e) => format!("启动失败：{e:#}"),
+            });
+            cx.notify();
+        });
+        success
     }
     fn end_task(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         let Some(p) = self.processes.read(cx).delegate().selection().cloned() else {
             return;
         };
         let view = cx.entity().downgrade();
-        w.open_dialog(cx, move |dialog, _, _| {
+        w.open_alert_dialog(cx, move |dialog, _, _| {
             dialog
+                .confirm()
                 .title("结束进程")
-                .width(px(460.))
-                .child(format!(
+                .description(format!(
                     "结束 {}（PID {}）？未保存的数据可能丢失。",
                     p.name, p.pid
                 ))
@@ -1019,11 +1042,7 @@ impl SystemMonitorApp {
                             .child("系统信息"),
                     )
                     .child(Self::detail_row("计算机", s.host_name.clone(), cx))
-                    .child(Self::detail_row(
-                        "操作系统",
-                        format!("{} {}", s.os_name, s.os_version),
-                        cx,
-                    ))
+                    .child(Self::detail_row("操作系统", s.os_version.clone(), cx))
                     .child(Self::detail_row("处理器", s.cpu_name.clone(), cx))
                     .child(Self::detail_row(
                         "物理内存",
@@ -1385,7 +1404,7 @@ impl Render for SystemMonitorApp {
 }
 pub fn run() {
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
             gpui_kit::component::set_locale("zh-CN");

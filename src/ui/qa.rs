@@ -35,8 +35,20 @@ pub fn start(
                 let table=view.read(cx).processes.read(cx).delegate();
                 ensure!(!table.rows.is_empty() && table.rows.iter().all(|p|p.name.to_lowercase().contains("systemmonitorx")),"filter failed");
                 capture(handle,cx,&directory.join("02-filtered.png"))?;
-                handle.update(cx,|_,w,cx|{w.press("ctrl-p",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click(("row",0usize),cx);})?;
                 Ok::<(), anyhow::Error>(())
+            })?;
+            smol::Timer::after(Duration::from_millis(200)).await;
+            cx.update(|cx|->Result<()> {
+                ensure!(view.read(cx).processes.read(cx).delegate().selection().is_some(),"process row selection failed");
+                handle.update(cx,|_,w,cx|w.click("end",cx))?;
+                Ok(())
+            })?;
+            smol::Timer::after(Duration::from_millis(300)).await;
+            cx.update(|cx|->Result<()> {
+                capture(handle,cx,&directory.join("02b-end-confirmation.png"))?;
+                handle.update(cx,|_,w,cx|{ensure!(w.has_active_dialog(cx),"end task did not request confirmation");w.click("cancel",cx);w.press("ctrl-p",cx);Ok::<(),anyhow::Error>(())})??;
+                Ok(())
             })?;
             smol::Timer::after(Duration::from_millis(150)).await;
             cx.update(|cx| -> Result<()> {
@@ -81,7 +93,13 @@ pub fn start(
             smol::Timer::after(Duration::from_millis(300)).await;
             cx.update(|cx| -> Result<()> {
                 capture(handle,cx,&directory.join("08-new-task.png"))?;
-                handle.update(cx,|_,w,cx|{w.close_dialog(cx);w.resize(size(px(1040.),px(640.)));w.refresh();})?;
+                handle.update(cx,|_,w,cx|{w.click("task-run",cx);})?;
+                Ok::<(), anyhow::Error>(())
+            })?;
+            smol::Timer::after(Duration::from_millis(200)).await;
+            cx.update(|cx| -> Result<()> {
+                ensure!(view.read(cx).message.as_ref().is_some_and(|m|m.contains("启动失败")),"empty task must produce an error");
+                handle.update(cx,|_,w,cx|{ensure!(w.has_active_dialog(cx),"failed launch dismissed dialog");w.click("task-cancel",cx);w.resize(size(px(1040.),px(640.)));w.refresh();Ok::<(),anyhow::Error>(())})??;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(300)).await;
@@ -93,7 +111,7 @@ pub fn start(
             Err(error) => serde_json::json!({"passed":false,"error":format!("{error:#}")}),
         };
         let _ = std::fs::write(directory.join("ui-report.json"),serde_json::to_vec_pretty(&report).unwrap());
-        let _ = cx.update(|cx|cx.quit());
+        cx.update(|cx|cx.quit());
         if report["passed"] != true { std::process::exit(1); }
     }).detach();
 }
