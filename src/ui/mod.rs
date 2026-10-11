@@ -713,6 +713,19 @@ impl SystemMonitorApp {
                             ),
                     ),
             )
+            .when_some(
+                self.snapshot.as_ref().and_then(|s| s.gpu_note.clone()),
+                |e, note| {
+                    e.child(
+                        div()
+                            .px_6()
+                            .py_2()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(note),
+                    )
+                },
+            )
             .child(
                 div().flex_1().min_h_0().child(
                     DataTable::new(&self.processes)

@@ -582,7 +582,11 @@ impl Monitor {
         } else {
             Some("系统温度来自 Windows 热区传感器，不一定对应 CPU 核心温度。".into())
         };
-        let gpu_note = gpus.is_empty().then(|| "未检测到可用的图形适配器。".into());
+        let gpu_note = self
+            .gpu
+            .process_memory_note()
+            .map(str::to_owned)
+            .or_else(|| gpus.is_empty().then(|| "未检测到可用的图形适配器。".into()));
         let io_note = disks
             .iter()
             .any(|disk| disk.total_read_bytes.is_none())

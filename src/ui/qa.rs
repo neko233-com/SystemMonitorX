@@ -107,7 +107,7 @@ pub fn start(
             Ok::<(), anyhow::Error>(())
         }.await.context("native UI smoke");
         let report = match result {
-            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","checks":["live telemetry","process table","Ctrl+F and filter","pause/resume","performance navigation","devices navigation","services","startup","settings","new task dialog","minimum window size"]}),
+            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","services","startup","settings","new task dialog","empty command error and cancel","minimum window size"]}),
             Err(error) => serde_json::json!({"passed":false,"error":format!("{error:#}")}),
         };
         let _ = std::fs::write(directory.join("ui-report.json"),serde_json::to_vec_pretty(&report).unwrap());

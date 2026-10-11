@@ -6,7 +6,7 @@
 //! GPU utilization is the busiest engine after summing its process instances,
 //! following <https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/>.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::LUID;
@@ -55,6 +55,7 @@ pub struct GpuMonitor {
     query: Option<PdhQuery>,
     process_usage: HashMap<u32, f32>,
     process_memory: HashMap<u32, u64>,
+    process_memory_note: Option<String>,
     last_device_scan: Instant,
 }
 
@@ -73,6 +74,7 @@ impl GpuMonitor {
             query: PdhQuery::new(),
             process_usage: HashMap::new(),
             process_memory: HashMap::new(),
+            process_memory_note: None,
             last_device_scan: Instant::now(),
         }
     }
@@ -90,6 +92,12 @@ impl GpuMonitor {
         &self.process_memory
     }
 
+    /// Explains why obviously invalid WDDM process-memory values were omitted.
+    /// Adapter totals and engine utilization remain independently available.
+    pub fn process_memory_note(&self) -> Option<&str> {
+        self.process_memory_note.as_deref()
+    }
+
     pub fn sample(&mut self) -> Vec<GpuSample> {
         if self.last_device_scan.elapsed() >= Duration::from_secs(30) {
             self.adapters = enumerate_adapters();
@@ -102,13 +110,27 @@ impl GpuMonitor {
         // Never retain a previous PID's values after a failed collection.
         self.process_usage.clear();
         self.process_memory.clear();
+        self.process_memory_note = None;
         let counters = self.query.as_mut().map(PdhQuery::sample);
+        // Use the same hardware LUID set for per-process and adapter views.
+        // Otherwise excluded indirect-display aliases can still pollute PIDs.
+        let adapter_capacities: HashMap<_, _> = self
+            .adapters
+            .iter()
+            .map(|adapter| (adapter.luid, adapter.dedicated_memory_total))
+            .collect();
         let aggregated = counters
             .as_ref()
-            .map(aggregate_counters)
+            .map(|snapshot| aggregate_counters(snapshot, &adapter_capacities))
             .unwrap_or_default();
         self.process_usage.clone_from(&aggregated.process_usage);
         self.process_memory.clone_from(&aggregated.process_memory);
+        if !aggregated.invalid_process_memory_pids.is_empty() {
+            self.process_memory_note = Some(format!(
+                "{} 个进程的 GPU 内存计数超出显卡容量，已显示为不可用（Windows WDDM 计数器异常）。",
+                aggregated.invalid_process_memory_pids.len()
+            ));
+        }
 
         self.adapters
             .iter()
@@ -572,9 +594,13 @@ struct AggregatedCounters {
     shared: HashMap<u64, u64>,
     process_usage: HashMap<u32, f32>,
     process_memory: HashMap<u32, u64>,
+    invalid_process_memory_pids: HashSet<u32>,
 }
 
-fn aggregate_counters(snapshot: &CounterSnapshot) -> AggregatedCounters {
+fn aggregate_counters(
+    snapshot: &CounterSnapshot,
+    adapter_capacities: &HashMap<u64, u64>,
+) -> AggregatedCounters {
     let mut result = AggregatedCounters::default();
     let mut process_engines: HashMap<(u32, u64, u32, u32), f64> = HashMap::new();
     for counter in snapshot.engines.iter().flatten() {
@@ -584,6 +610,9 @@ fn aggregate_counters(snapshot: &CounterSnapshot) -> AggregatedCounters {
         let Some(instance) = parse_instance(&counter.name) else {
             continue;
         };
+        if !adapter_capacities.contains_key(&instance.luid) {
+            continue;
+        }
         let (Some(pid), Some(engine)) = (instance.pid, instance.engine) else {
             continue;
         };
@@ -607,16 +636,38 @@ fn aggregate_counters(snapshot: &CounterSnapshot) -> AggregatedCounters {
     }
     result.dedicated = adapter_memory(snapshot.adapter_dedicated.as_deref());
     result.shared = adapter_memory(snapshot.adapter_shared.as_deref());
+    result
+        .dedicated
+        .retain(|luid, _| adapter_capacities.contains_key(luid));
+    result
+        .shared
+        .retain(|luid, _| adapter_capacities.contains_key(luid));
 
     // Only combine a PID/adapter/node when both memory counters were valid.
     let dedicated = process_memory(snapshot.process_dedicated.as_deref());
     let shared = process_memory(snapshot.process_shared.as_deref());
     for (key, dedicated_bytes) in dedicated {
+        let Some(capacity) = adapter_capacities.get(&key.1) else {
+            continue;
+        };
+        // KB4490156 documents cumulative errors in GPU Process Memory while
+        // whole-adapter counters remain correct. An individual dedicated
+        // allocation cannot reside beyond a reported positive VRAM capacity.
+        // Do not turn this impossible value into either a clipped value or a
+        // partial multi-GPU total. A zero DXGI capacity is not a usable bound.
+        // https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/gpu-process-memory-counters-report-wrong-value
+        if *capacity > 0 && dedicated_bytes > *capacity {
+            result.invalid_process_memory_pids.insert(key.0);
+            continue;
+        }
         if let Some(shared_bytes) = shared.get(&key) {
             let total = result.process_memory.entry(key.0).or_default();
             *total = total.saturating_add(dedicated_bytes.saturating_add(*shared_bytes));
         }
     }
+    result
+        .process_memory
+        .retain(|pid, _| !result.invalid_process_memory_pids.contains(pid));
     result
 }
 
@@ -662,6 +713,12 @@ mod tests {
         }
     }
 
+    fn adapter_capacities() -> HashMap<u64, u64> {
+        [(0xA, 16_384), (0xB, 16_384), (0xC, 0)]
+            .into_iter()
+            .collect()
+    }
+
     #[test]
     fn instance_parser_preserves_full_luid_and_physical_engine() {
         let parsed =
@@ -690,7 +747,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let aggregate = aggregate_counters(&snapshot);
+        let aggregate = aggregate_counters(&snapshot, &adapter_capacities());
         assert_eq!(aggregate.engines[&(0xA, 0, 0)].1, 55.0);
         assert_eq!(aggregate.engines[&(0xA, 0, 1)].1, 40.0);
         assert_eq!(aggregate.engines[&(0xB, 0, 0)].1, 12.0);
@@ -720,7 +777,7 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let aggregate = aggregate_counters(&snapshot);
+        let aggregate = aggregate_counters(&snapshot, &adapter_capacities());
         assert_eq!(aggregate.dedicated[&0xA], 4096);
         assert_eq!(aggregate.process_memory[&1], 4096);
         assert_eq!(aggregate.process_memory[&2], 3072);
@@ -729,7 +786,7 @@ mod tests {
 
     #[test]
     fn missing_and_invalid_counters_do_not_become_zero_usage() {
-        let aggregate = aggregate_counters(&CounterSnapshot::default());
+        let aggregate = aggregate_counters(&CounterSnapshot::default(), &adapter_capacities());
         assert!(aggregate.engines.is_empty());
         assert!(aggregate.process_usage.is_empty());
         assert!(aggregate.dedicated.is_empty());
@@ -741,9 +798,77 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let aggregate = aggregate_counters(&snapshot);
+        let aggregate = aggregate_counters(&snapshot, &adapter_capacities());
         assert!(!aggregate.dedicated.contains_key(&0xA));
         assert!(!aggregate.dedicated.contains_key(&0xB));
         assert_eq!(aggregate.dedicated.get(&0xC), Some(&0));
+    }
+
+    #[test]
+    fn indirect_display_aliases_do_not_pollute_physical_gpu_or_pid_totals() {
+        let snapshot = CounterSnapshot {
+            engines: Some(vec![
+                value("pid_1_luid_0x0_0xA_phys_0_eng_0_engtype_3D", 25.0),
+                value("pid_1_luid_0x0_0xFFFF_phys_0_eng_0_engtype_3D", 99.0),
+                value("pid_2_luid_0x0_0xFFFF_phys_0_eng_0_engtype_3D", 50.0),
+            ]),
+            adapter_dedicated: Some(vec![
+                value("luid_0x0_0xA_phys_0", 4096.0),
+                value("luid_0x0_0xFFFF_phys_0", 65536.0),
+            ]),
+            adapter_shared: Some(vec![value("luid_0x0_0xFFFF_phys_0", 65536.0)]),
+            process_dedicated: Some(vec![
+                value("pid_1_luid_0x0_0xA_phys_0", 1024.0),
+                value("pid_1_luid_0x0_0xFFFF_phys_0", 65536.0),
+                value("pid_2_luid_0x0_0xFFFF_phys_0", 65536.0),
+            ]),
+            process_shared: Some(vec![
+                value("pid_1_luid_0x0_0xA_phys_0", 512.0),
+                value("pid_1_luid_0x0_0xFFFF_phys_0", 65536.0),
+                value("pid_2_luid_0x0_0xFFFF_phys_0", 65536.0),
+            ]),
+            ..Default::default()
+        };
+        let aggregate = aggregate_counters(&snapshot, &adapter_capacities());
+        assert_eq!(aggregate.process_usage[&1], 25.0);
+        assert_eq!(aggregate.process_memory[&1], 1536);
+        assert!(!aggregate.process_usage.contains_key(&2));
+        assert!(!aggregate.process_memory.contains_key(&2));
+        assert!(!aggregate.dedicated.contains_key(&0xFFFF));
+        assert!(!aggregate.shared.contains_key(&0xFFFF));
+        assert_eq!(aggregate.engines.len(), 1);
+        assert!(aggregate.invalid_process_memory_pids.is_empty());
+    }
+
+    #[test]
+    fn impossible_process_memory_is_unavailable_without_corrupting_adapter_totals() {
+        let snapshot = CounterSnapshot {
+            engines: Some(vec![value(
+                "pid_1_luid_0x0_0xA_phys_0_eng_0_engtype_3D",
+                10.0,
+            )]),
+            adapter_dedicated: Some(vec![value("luid_0x0_0xA_phys_0", 4096.0)]),
+            process_dedicated: Some(vec![
+                value("pid_1_luid_0x0_0xA_phys_0", 65536.0),
+                value("pid_1_luid_0x0_0xB_phys_0", 128.0),
+                value("pid_2_luid_0x0_0xA_phys_0", 1024.0),
+                value("pid_3_luid_0x0_0xC_phys_0", 1024.0),
+            ]),
+            process_shared: Some(vec![
+                value("pid_1_luid_0x0_0xA_phys_0", 0.0),
+                value("pid_1_luid_0x0_0xB_phys_0", 512.0),
+                value("pid_2_luid_0x0_0xA_phys_0", 512.0),
+                value("pid_3_luid_0x0_0xC_phys_0", 0.0),
+            ]),
+            ..Default::default()
+        };
+        let aggregate = aggregate_counters(&snapshot, &adapter_capacities());
+        assert!(!aggregate.process_memory.contains_key(&1));
+        assert!(aggregate.invalid_process_memory_pids.contains(&1));
+        assert_eq!(aggregate.process_memory[&2], 1536);
+        // An unknown/zero capacity cannot establish that a value is impossible.
+        assert_eq!(aggregate.process_memory[&3], 1024);
+        assert_eq!(aggregate.dedicated[&0xA], 4096);
+        assert_eq!(aggregate.process_usage[&1], 10.0);
     }
 }

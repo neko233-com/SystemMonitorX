@@ -11,6 +11,15 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/neko233-com/SystemMonitorX" />
     <Property Id="ARPHELPLINK" Value="https://github.com/neko233-com/SystemMonitorX/issues" />
     <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- GPUI's IDXGIFactory6 requires Windows 10 1803 (build 17134). MSI's
+         VersionNT stays 603 on Windows 10, so use the native registry build. -->
+    <Property Id="WINDOWSBUILDNUMBER" Secure="yes">
+      <RegistrySearch Id="WindowsBuildNumberSearch" Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR (WINDOWSBUILDNUMBER &gt;= 17134)"
+            Message="SystemMonitorX requires Windows 10 version 1803 (build 17134) or later, including Windows 11." />
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="UserProgramsFolder" Name="Programs">

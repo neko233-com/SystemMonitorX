@@ -30,6 +30,10 @@ function Read-MsiRows($Database, [string]$Sql, [int]$Columns) {
     }
 }
 
+function Set-MsiSessionProperty($Session, [string]$Name, [string]$Value) {
+    [void]$Session.GetType().InvokeMember('Property', [Reflection.BindingFlags]::SetProperty, $null, $Session, @($Name, $Value))
+}
+
 Push-Location -LiteralPath $taskRoot
 try {
     if (-not $PackageOnly) {
@@ -66,6 +70,7 @@ try {
 
         $taskInstaller = New-Object -ComObject WindowsInstaller.Installer
         $taskDatabase = $null
+        $taskSession = $null
         try {
             $taskDatabase = $taskInstaller.OpenDatabase($taskMsi, 0)
             $taskProperties = @{}
@@ -90,7 +95,65 @@ try {
             $taskShortcuts = @(Read-MsiRows $taskDatabase 'SELECT `Shortcut`, `Target` FROM `Shortcut`' 2)
             if (-not ($taskShortcuts | Where-Object { $_[0] -eq 'LaunchShortcut' -and $_[1] -eq '[#MainExecutable]' })) { throw 'MSI launch shortcut is missing or invalid.' }
             if (-not ($taskShortcuts | Where-Object { $_[0] -eq 'UninstallShortcut' -and $_[1] -eq '[System64Folder]msiexec.exe' })) { throw 'MSI uninstall shortcut is missing or invalid.' }
+
+            $taskBuildSearch = @(Read-MsiRows $taskDatabase "SELECT ``Signature_`` FROM ``AppSearch`` WHERE ``Property`` = 'WINDOWSBUILDNUMBER'" 1)
+            if ($taskBuildSearch.Count -ne 1 -or $taskBuildSearch[0][0] -ne 'WindowsBuildNumberSearch') { throw 'MSI is missing the Windows build AppSearch property.' }
+            $taskBuildLocator = @(Read-MsiRows $taskDatabase "SELECT ``Root``, ``Key``, ``Name``, ``Type`` FROM ``RegLocator`` WHERE ``Signature_`` = 'WindowsBuildNumberSearch'" 4)
+            # RegLocator raw value (2) + native 64-bit registry flag (16).
+            if ($taskBuildLocator.Count -ne 1 -or $taskBuildLocator[0][0] -ne '2' -or $taskBuildLocator[0][1] -ne 'SOFTWARE\Microsoft\Windows NT\CurrentVersion' -or $taskBuildLocator[0][2] -ne 'CurrentBuildNumber' -or $taskBuildLocator[0][3] -ne '18') {
+                throw 'MSI Windows build search must read HKLM CurrentBuildNumber from the 64-bit registry.'
+            }
+            if ('WINDOWSBUILDNUMBER' -notin ($taskProperties['SecureCustomProperties'] -split ';')) { throw 'MSI Windows build property must be secure.' }
+            $taskOsCondition = 'Installed OR (WINDOWSBUILDNUMBER >= 17134)'
+            $taskLaunchConditions = @(Read-MsiRows $taskDatabase 'SELECT `Condition`, `Description` FROM `LaunchCondition`' 2)
+            if (-not ($taskLaunchConditions | Where-Object { $_[0] -eq $taskOsCondition -and $_[1] -match '1803.*17134' })) {
+                throw 'MSI is missing the Windows 10 1803+ launch condition and uninstall exception.'
+            }
+            foreach ($taskSequenceTable in @('InstallExecuteSequence', 'InstallUISequence')) {
+                $taskSequence = @{}
+                foreach ($taskRow in (Read-MsiRows $taskDatabase "SELECT ``Action``, ``Sequence`` FROM ``$taskSequenceTable``" 2)) { $taskSequence[$taskRow[0]] = [int]$taskRow[1] }
+                if (-not $taskSequence.ContainsKey('AppSearch') -or -not $taskSequence.ContainsKey('LaunchConditions') -or $taskSequence['AppSearch'] -ge $taskSequence['LaunchConditions']) {
+                    throw "MSI must read the Windows build before enforcing launch conditions in $taskSequenceTable."
+                }
+            }
+
+            # OpenPackage option 1 creates a safe session that prevents changes
+            # to the machine. AppSearch only reads registry values; no install
+            # actions or Execute/Install sequence is started here.
+            $taskInstaller.UILevel = 2
+            $taskSession = $taskInstaller.OpenPackage($taskMsi, 1)
+            [void]$taskSession.DoAction('AppSearch')
+            $taskSearchedBuild = $taskSession.Property('WINDOWSBUILDNUMBER')
+            $taskRegistry = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+            $taskWindowsKey = $null
+            try {
+                $taskWindowsKey = $taskRegistry.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion')
+                if (-not $taskWindowsKey) { throw 'Cannot read the native Windows build registry key.' }
+                $taskCurrentBuild = [string]$taskWindowsKey.GetValue('CurrentBuildNumber')
+            } finally {
+                if ($taskWindowsKey) { $taskWindowsKey.Dispose() }
+                $taskRegistry.Dispose()
+            }
+            if (-not $taskCurrentBuild -or $taskSearchedBuild -ne $taskCurrentBuild) { throw 'MSI AppSearch returned an incorrect current Windows build.' }
+            Set-MsiSessionProperty $taskSession 'Installed' ''
+            $taskCurrentExpected = if ([int]$taskCurrentBuild -ge 17134) { 1 } else { 0 }
+            if ($taskSession.EvaluateCondition($taskOsCondition) -ne $taskCurrentExpected) { throw 'MSI Windows condition evaluated incorrectly for the current machine.' }
+            foreach ($taskCase in @(
+                @{ Build = ''; Installed = ''; Expected = 0 },
+                @{ Build = '17133'; Installed = ''; Expected = 0 },
+                @{ Build = '17134'; Installed = ''; Expected = 1 },
+                @{ Build = '22000'; Installed = ''; Expected = 1 },
+                @{ Build = '9999'; Installed = ''; Expected = 0 },
+                @{ Build = '17133'; Installed = '1'; Expected = 1 },
+                @{ Build = ''; Installed = '1'; Expected = 1 }
+            )) {
+                Set-MsiSessionProperty $taskSession 'WINDOWSBUILDNUMBER' $taskCase.Build
+                Set-MsiSessionProperty $taskSession 'Installed' $taskCase.Installed
+                if ($taskSession.EvaluateCondition($taskOsCondition) -ne $taskCase.Expected) { throw "MSI OS condition failed for build '$($taskCase.Build)', Installed '$($taskCase.Installed)'." }
+            }
+            Write-Host "MSI Windows build AppSearch returned $taskSearchedBuild; minimum 17134, missing/older builds, Win11 and uninstall condition checks passed."
         } finally {
+            if ($taskSession) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskSession) }
             if ($taskDatabase) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskDatabase) }
             [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskInstaller)
         }

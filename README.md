@@ -12,7 +12,7 @@ Windows 专用的原生任务管理器替代应用，使用 **Rust 2024 + Longbr
 - `SystemMonitorX-0.1.0-x64-portable.zip`：解压后运行 `SystemMonitorX.exe`。
 - `SHA256SUMS.txt`：安装包和便携包的校验值。
 
-支持 Windows 10 / 11 x64。默认以普通用户运行；需要管理其他用户的进程时，可右键选择“以管理员身份运行”。应用不会自动提升权限，也不会修改默认任务管理器或系统快捷键。
+支持 Windows 10 1803（Build 17134）及以上 / Windows 11 x64，需要支持 GPUI 的 Direct3D 显卡和驱动。默认以普通用户运行；需要管理其他用户的进程时，可右键选择“以管理员身份运行”。应用不会自动提升权限，也不会修改默认任务管理器或系统快捷键。
 
 ## 已实现功能
 
@@ -33,6 +33,7 @@ Windows 专用的原生任务管理器替代应用，使用 **Rust 2024 + Longbr
 - GPU 使用率按适配器 LUID、物理节点和引擎聚合，显示最忙引擎，不把独立引擎的使用率相加。支持符合 WDDM 的 NVIDIA、AMD 与 Intel；实际可用项取决于驱动和系统计数器。
 - 整卡显存来自 `GPU Adapter Memory` 的 PDH 计数器；DXGI 提供显卡名称和容量。DXGI 的“当前进程预算”不被冒充为整卡使用量。间接/虚拟显示设备被过滤。
 - 内存采用进程工作集，GPU 进程内存由 WDDM 计数器提供。共享内存/共享资源的统计不能简单相加来计算全系统使用量。
+- Windows 的进程 GPU 内存计数器存在[微软记录的累积错误](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/gpu-process-memory-counters-report-wrong-value)。当单进程专用显存计数超过该显卡已知的正容量时，应用将该进程 GPU 内存显示为不可用，并在进程/设备页提示；不会裁剪成伪造数值，整卡统计独立保留。此校验只识别明显异常，不能保证发现所有系统计数器错误。
 - 字节量按 1024 换算为 KB / MB / GB；吞吐为字节/秒。进程 I/O 是 Windows `GetProcessIoCounters` 的读写传输量，也可能包含文件之外的设备 I/O；磁盘卷指标由 `IOCTL_DISK_PERFORMANCE` 采集。
 - `—` 表示权限不足、计数器未提供或样本不足，成功采集到的空闲值显示 0。受保护进程的部分 sysinfo 字段可能由操作系统返回零。
 - CPU/GPU 温度、风扇转速、功耗并非所有 Windows 驱动都有通用接口。当前只展示系统可读取的温度，不捏造数值；厂商 NVML/ADL、硬件传感器驱动尚未接入。
@@ -89,7 +90,7 @@ src/gpu.rs              DXGI / D3DKMT / PDH GPU 采集
 src/platform.rs         Windows 服务、启动项和进程管理
 src/export.rs           CSV 编码与公式注入防护
 src/bin/monitor_probe.rs 无界面诊断和受控操作验证
-packaging/              Windows 应用清单与 WiX 安装器
+packaging/              WiX 安装器
 scripts/                环境、验证及打包
 ```
 
