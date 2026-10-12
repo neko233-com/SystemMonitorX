@@ -43,7 +43,6 @@ The command selects the latest **published stable release**. A specified version
 
 The application runs with normal user permissions. Elevation is explicit and Windows handles consent. It does not modify the built-in Task Manager registration or system shortcuts. Packages are currently unsigned.
 
-**v0.5.0 source/native validation:** 238 source tests passed (178 library + 60 GUI); 2 environment-dependent tests remain ignored. All 54 real Windows/D3D11 interaction checks passed at 1040×640 logical pixels and 1.5× scale, including eight Settings language switches and the new investigation tools. Ten self-process module/memory checks and 29 installer self-tests passed. Public package and installation acceptance is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md).
 
 ## Start here
 
@@ -171,6 +170,8 @@ Version 0.2.1 fixed older extended-path MSI handoff failures. Existing 0.2.0 use
 Settings/history are in `%LOCALAPPDATA%\SystemMonitorX`. Update checks do not upload device or process telemetry. Windows paths use UTF-16 APIs, counter APIs are locale independent, and names retain Unicode source data. English and complete Chinese documentation are linked throughout.
 
 ## Build and verify
+
+**v0.5.0 source/native validation:** 238 source tests passed (178 library + 60 GUI); 2 environment-dependent tests remain ignored. All 54 real Windows/D3D11 interaction checks passed, including dedicated minimum-window and eight-language acceptance at 1040×640 logical pixels and 1.5× scale. Ten self-process module/memory checks and 29 installer self-tests passed. Public package and installation acceptance is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md).
 
 Requires Rust 1.96.0, Visual Studio Desktop development with C++, Windows SDK, Python 3 for the standard-library translation validation gate, and .NET SDK / WiX 5.0.2 for packaging. Python is a development-verification dependency and is not bundled with the application. `Cargo.lock` pins dependencies.
 

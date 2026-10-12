@@ -26,11 +26,23 @@ Native inspections are sequential observations, not an atomic debugger snapshot.
 | v0.5.0 acceptance | Verified result |
 | --- | --- |
 | Source / translations | 238 tests passed (178 library + 60 GUI), 2 ignored; strict Clippy/format; 628 owned UI source texts with no catalog/coverage findings; 641 app keys across eight languages; 15 checker self-tests |
-| Native interaction | 54/54 real Windows/D3D11 checks (34 baseline + 20 usability); eight native Settings language switches, 64 private locale screenshots at 1040×640 logical pixels / 1.5× scale; new module/region screenshots in all eight locales visually reviewed |
+| Native interaction | 54/54 real Windows/D3D11 checks (34 baseline + 20 usability); eight native Settings language switches, 64 private locale screenshots at 1040×640 logical pixels / 1.5× scale; one new module/region screenshot per locale visually reviewed (8 of 24 new images) |
 | Read-only diagnostics | 10/10 own-process native checks, including complete modules/regions, exact-identity rejection and partial limits; GUI inspected 120 modules / 2,208 regions within limits |
 | Installer / docs | 29 offline installer self-tests on PS5.1 and PS7; eight anonymous English/Chinese public documentation images visually reviewed separately; PNG text/EXIF metadata absent |
 | MSI / ZIP | Passed local final packaging: exact 16-file MSI/ZIP payload, versions, CRT, per-user destination, HKCU64 install path, shortcuts and extracted-file hashes; MSI 8,404,992 bytes / ZIP 11,256,861 bytes |
-| Public release / installation | Pending actual published-asset and public installation acceptance |
+| Public release / installation | Passed: latest stable v0.5.0 published on 2026-10-13 (Asia/Shanghai); official three-asset digests match the final locally validated bytes. PS5.1 public install returned InstalledVerified 0.5.0, exit 0/no restart; 32 read-only checks and all 16 installed-file hashes/lengths match the official ZIP; main/helper versions, registry and both shortcuts match |
+| Native installed / portable launch | Passed: installed native window opened and remains running for the user; exact owned portable window launched/closed normally from an international-character path, with all 16 public-ZIP file hashes matched |
+| Update metadata / README rendering | Production checker parsed official v0.5.0 MSI name, URL, SHA-256 and 8,404,992-byte length; GitHub-rendered English README includes four pictures and folded developer examples; eight English/Chinese documentation PNGs are versioned in the release tag |
+
+Final published assets ([v0.5.0](https://github.com/neko233-com/SystemMonitorX/releases/tag/v0.5.0)):
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MSI | 8404992 | `0ffab9ad3d2f5d6f099965382323b5f5b895fb27024ac7246080e8b031e7569f` |
+| Portable ZIP | 11256861 | `986d1b53b4534262ccb7e25aeb5719ed53156dec2b83b14cef7d95adec7186b8` |
+| SHA256SUMS.txt | 201 | `4ef5ec3442bfe5885ba9cd5c30fc4c8a90e8f10f687939fc25b537df873fde78` |
+
+[Source CI](https://github.com/neko233-com/SystemMonitorX/actions/runs/38271463653) and [tag/release CI](https://github.com/neko233-com/SystemMonitorX/actions/runs/38271475420) both passed for source commit `c448ffa4d9d0b02d92a7e5838f2384e17734ee0b`. CI initially regenerated this draft's package bytes; after CI finished, the final locally validated artifacts were restored and then published. The three published assets are immutable. Local raw QA/install reports remain private.
 
 These are distinct scopes: synthetic documentation samples do not establish live telemetry or performance. Hardware/permissions/accessibility/regional-formatting and the complete automatic-newer-release update regression remain the limitations described below. Historical results below apply to their stated versions.
 

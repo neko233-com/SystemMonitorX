@@ -43,7 +43,6 @@ Windows PowerShell 5.1 / PowerShell 7 一键安装或升级：
 
 应用默认以普通用户权限运行。管理员入口由用户主动选择，Windows 负责权限确认。不会修改默认任务管理器注册或系统快捷键。发布包目前未做代码签名。
 
-**v0.5.0 源码/原生验收：**238 项源码测试通过（库 178 + GUI 60），2 项环境相关测试仍默认忽略。1040×640 逻辑像素、1.5× 缩放下，54 项真实 Windows/D3D11 交互检查全部通过，包括八种设置语言切换和新增排查工具；本进程模块/内存 10 项检查、安装脚本 29 项自测通过。公开安装包及本机安装验收在[在线路线图](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.zh-CN.md)维护。
 
 ## 从这里开始
 
@@ -171,6 +170,8 @@ v0.2.1 修复旧版扩展路径传入 MSI 的交接失败。v0.2.0 用户应手�
 设置与历史保存于 `%LOCALAPPDATA%\SystemMonitorX`。更新检查不上传设备或进程遥测。Windows 路径使用 UTF-16 API，计数接口不依赖界面语言，名称保留原始 Unicode。英文与完整中文文档相互链接。
 
 ## 构建与验证
+
+**v0.5.0 源码/原生验收：**238 项源码测试通过（库 178 + GUI 60），2 项环境相关测试仍默认忽略。54 项真实 Windows/D3D11 交互检查全部通过，其中包含 1040×640 逻辑像素、1.5× 缩放下的专门最小窗口和八语言验收；本进程模块/内存 10 项检查、安装脚本 29 项自测通过。公开安装包及本机安装验收在[在线路线图](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.zh-CN.md)维护。
 
 需要 Rust 1.96.0、Visual Studio「使用 C++ 的桌面开发」、Windows SDK、翻译验证门禁所需 Python 3（仅用标准库），以及打包所需 .NET SDK / WiX 5.0.2。Python 仅用于开发验证，不随应用分发。`Cargo.lock` 锁定依赖。
 
