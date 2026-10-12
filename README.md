@@ -26,6 +26,8 @@ One-command install or upgrade in Windows PowerShell 5.1 or PowerShell 7:
 
 The application runs with normal user permissions. Elevation is explicit and Windows handles consent. It does not modify the built-in Task Manager registration or system shortcuts. Packages are currently unsigned.
 
+Public v0.3.0 was installed through the PS5.1 script (MSI exit 0, no restart). All 16 installed files match the public ZIP; both executable versions, HKCU location and Start menu target passed. A portable copy started and closed normally from a path containing Chinese, accented Latin and Japanese characters.
+
 ## Developer workflows
 
 Lists default to the same Unicode lowercase name ordering, with PID and birth identity breaking ties. Metric refreshes reuse name order; changing CPU usage does not continuously move rows. Click another column when you explicitly want numeric sorting.
