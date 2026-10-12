@@ -71,6 +71,17 @@ try {
         }
         $null = Get-Content -LiteralPath $taskSmokeOut -Raw | ConvertFrom-Json
         Write-Host "Rust checks and hardware smoke test passed. Report: $taskSmokeOut"
+        $taskDiagnosticExe = Join-Path $taskRoot 'target/release/diagnostics_probe.exe'
+        $taskDiagnosticOut = Join-Path $taskRoot 'target/diagnostics-smoke-report.json'
+        $taskDiagnosticErr = Join-Path $taskRoot 'target/diagnostics-smoke-stderr.txt'
+        $taskDiagnosticSmoke = Start-Process -FilePath $taskDiagnosticExe -ArgumentList '--smoke' -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $taskDiagnosticOut -RedirectStandardError $taskDiagnosticErr
+        if ($taskDiagnosticSmoke.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $taskDiagnosticErr) { Get-Content -LiteralPath $taskDiagnosticErr | Write-Host }
+            throw "Own-process diagnostic smoke test failed (exit $($taskDiagnosticSmoke.ExitCode))."
+        }
+        $taskDiagnosticReport = Get-Content -LiteralPath $taskDiagnosticOut -Raw | ConvertFrom-Json
+        if ($taskDiagnosticReport.passed -ne $true -or @($taskDiagnosticReport.checks).Count -lt 10) { throw 'Own-process diagnostics did not complete all native acceptance checks.' }
+        Write-Host "Read-only native module/memory diagnostic smoke passed. Private report: $taskDiagnosticOut"
     }
 
     if ($MsiPath) {

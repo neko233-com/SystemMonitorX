@@ -54,6 +54,14 @@ impl SystemMonitorApp {
                 (raw, name, on_change)
             })
             .collect();
+        let simple = Rc::new(cx.listener(|this, _: &ClickEvent, window, cx| {
+            this.set_simple_columns(true, cx);
+            window.refresh();
+        }));
+        let detailed_columns = Rc::new(cx.listener(|this, _: &ClickEvent, window, cx| {
+            this.set_simple_columns(false, cx);
+            window.refresh();
+        }));
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
             let hidden = view
@@ -104,11 +112,23 @@ impl SystemMonitorApp {
                         }),
                 )
                 .footer(
-                    h_flex().justify_end().child(
-                        Button::new("process-columns-close")
-                            .label(tr("关闭"))
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    ),
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .justify_end()
+                        .child(Button::new("columns-simple").label(tr("常用列")).on_click({
+                            let run = simple.clone();
+                            move |e, w, cx| run(e, w, cx)
+                        }))
+                        .child(Button::new("columns-all").label(tr("全部列")).on_click({
+                            let run = detailed_columns.clone();
+                            move |e, w, cx| run(e, w, cx)
+                        }))
+                        .child(
+                            Button::new("process-columns-close")
+                                .label(tr("关闭"))
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        ),
                 )
         });
     }

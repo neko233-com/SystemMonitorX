@@ -13,7 +13,7 @@ use windows::{
     Win32::{
         Foundation::{
             CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA,
-            ERROR_NO_MORE_FILES, ERROR_NO_MORE_ITEMS, FILETIME, HANDLE,
+            ERROR_NO_MORE_FILES, ERROR_NO_MORE_ITEMS, FILETIME, HANDLE, WAIT_FAILED, WAIT_TIMEOUT,
         },
         Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
         System::{
@@ -38,8 +38,9 @@ use windows::{
                 GetCurrentProcess, GetProcessTimes, HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS,
                 IsProcessCritical, NORMAL_PRIORITY_CLASS, OpenProcess, OpenProcessToken,
                 PROCESS_ACCESS_RIGHTS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
-                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_TERMINATE,
-                STARTUPINFOW, SetPriorityClass, TerminateProcess,
+                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_SYNCHRONIZE,
+                PROCESS_TERMINATE, STARTUPINFOW, SetPriorityClass, TerminateProcess,
+                WaitForSingleObject,
             },
         },
         UI::Shell::{
@@ -618,8 +619,14 @@ fn verified_process(
         "缺少进程身份信息，请刷新进程列表后重试"
     );
     let handle = OwnedHandle(
-        unsafe { OpenProcess(access | PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
-            .with_context(|| format!("无法访问进程 {pid}：进程可能已退出，或需要管理员权限"))?,
+        unsafe {
+            OpenProcess(
+                access | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                false,
+                pid,
+            )
+        }
+        .with_context(|| format!("无法访问进程 {pid}：进程可能已退出，或需要管理员权限"))?,
     );
     let (mut created, mut exited, mut kernel, mut user) = (
         FILETIME::default(),
@@ -642,10 +649,11 @@ fn verified_process(
         identity_matches,
         "进程已发生变化（PID 被重新使用），请刷新后重试"
     );
-    ensure!(
-        exited.dwHighDateTime == 0 && exited.dwLowDateTime == 0,
-        "该进程已经退出，请刷新后重试"
-    );
+    let state = unsafe { WaitForSingleObject(handle.0, 0) };
+    if state == WAIT_FAILED {
+        return Err(windows::core::Error::from_thread()).context("无法核验进程运行状态");
+    }
+    ensure!(state == WAIT_TIMEOUT, "该进程已经退出，请刷新后重试");
     let mut critical = BOOL::default();
     unsafe { IsProcessCritical(handle.0, &mut critical) }
         .context("无法确认进程是否为系统关键进程，已取消操作")?;
@@ -1255,10 +1263,11 @@ fn creation_ticks(handle: HANDLE) -> Result<u64> {
     );
     unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) }
         .context("无法验证子进程创建时间")?;
-    ensure!(
-        exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0,
-        "子进程已经退出"
-    );
+    let state = unsafe { WaitForSingleObject(handle, 0) };
+    if state == WAIT_FAILED {
+        return Err(windows::core::Error::from_thread()).context("无法核验进程运行状态");
+    }
+    ensure!(state == WAIT_TIMEOUT, "子进程已经退出");
     Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
 }
 
@@ -1306,7 +1315,7 @@ pub fn terminate_process_tree(pid: u32, expected_start_time: u64) -> Result<Vec<
             let handle = OwnedHandle(
                 unsafe {
                     OpenProcess(
-                        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
                         false,
                         child,
                     )

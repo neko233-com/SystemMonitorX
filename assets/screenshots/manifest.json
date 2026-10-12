@@ -1,0 +1,64 @@
+{
+  "version": "0.5.0",
+  "renderer": "native Windows GPUI/D3D11 client area",
+  "data": "anonymous illustrative documentation samples; not real telemetry or performance evidence",
+  "pixel_review": "all eight images visually reviewed",
+  "files": [
+    {
+      "file": "overview-en.png",
+      "bytes": 266030,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "390dad453dc896080c72984815f1a00365415f18c1f45490a1bc640c95657e3a"
+    },
+    {
+      "file": "overview-zh.png",
+      "bytes": 231906,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "fe418533bb971d7cb81265bbfcaca6973974344e202e1dee2689524d5d8d223a"
+    },
+    {
+      "file": "processes-en.png",
+      "bytes": 240113,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "abc969aff48e760f6b8ec2470cd7ba0ed5355d4030ff7bbdbc6ebe5c1dcc48ec"
+    },
+    {
+      "file": "processes-zh.png",
+      "bytes": 218470,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "daaead672b7163ce3302cd18daa841f1878832e01f0afcfca4560ce15e965de7"
+    },
+    {
+      "file": "ports-en.png",
+      "bytes": 251587,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "b07f0478fadfbdf00a137c1dcd0f6ccd8833860e056442a6da7c15ec18eb8409"
+    },
+    {
+      "file": "ports-zh.png",
+      "bytes": 228155,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "80f3d6bc8579a7835020a12163cfe746d7ad15908358a42441b7e9cd1d63d0e1"
+    },
+    {
+      "file": "process-tools-en.png",
+      "bytes": 281545,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "0fea4b073a5fa8d5ce3df52bea20d72996cb551266f5e9eca77d28130d44ac57"
+    },
+    {
+      "file": "process-tools-zh.png",
+      "bytes": 253778,
+      "width": 1860,
+      "height": 1230,
+      "sha256": "267e33b624ccb5dc4fcb28c0d1401898a8829937cf5f779def4dcd2b0c191ec3"
+    }
+  ]
+}

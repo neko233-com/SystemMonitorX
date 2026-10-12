@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail, ensure};
 use windows::Win32::Foundation::{
     CloseHandle, FILETIME, GetLastError, HANDLE, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
-    STATUS_INFO_LENGTH_MISMATCH,
+    STATUS_INFO_LENGTH_MISMATCH, WAIT_FAILED, WAIT_TIMEOUT,
 };
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
@@ -23,8 +23,9 @@ use windows::Win32::System::Threading::{
     GetProcessInformation, GetProcessTimes, HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS,
     IsWow64Process2, NORMAL_PRIORITY_CLASS, OpenProcess, PROCESS_NAME_WIN32,
     PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
-    PROCESS_POWER_THROTTLING_STATE, PROCESS_QUERY_LIMITED_INFORMATION, ProcessPowerThrottling,
-    QueryFullProcessImageNameW, REALTIME_PRIORITY_CLASS,
+    PROCESS_POWER_THROTTLING_STATE, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    ProcessPowerThrottling, QueryFullProcessImageNameW, REALTIME_PRIORITY_CLASS,
+    WaitForSingleObject,
 };
 use windows::core::{PCSTR, PCWSTR, PWSTR, w};
 
@@ -70,8 +71,14 @@ impl ProcessDetails {
         // SAFETY: a read-only, minimally privileged process handle. Ownership
         // remains live from identity verification through the final check.
         let process = OwnedProcess(
-            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
-                .context("无法读取此进程详情：进程已退出、访问被拒绝或受到系统保护")?,
+            unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    false,
+                    pid,
+                )
+            }
+            .context("无法读取此进程详情：进程已退出、访问被拒绝或受到系统保护")?,
         );
         verify_identity(process.0, exact_creation_ticks)?;
         let mut details = Self {
@@ -188,10 +195,13 @@ fn verify_identity(handle: HANDLE, expected: u64) -> Result<()> {
         actual == expected,
         "进程身份已改变（PID 被重用或选择已过期），未读取详情"
     );
-    ensure!(
-        exit.dwHighDateTime == 0 && exit.dwLowDateTime == 0,
-        "进程已退出，详情结果已过期"
-    );
+    // GetProcessTimes leaves live-process exit FILETIME undefined. Check the
+    // held process object's signal state without blocking or relying on exit codes.
+    let state = unsafe { WaitForSingleObject(handle, 0) };
+    if state == WAIT_FAILED {
+        return Err(windows::core::Error::from_thread()).context("无法核验进程运行状态");
+    }
+    ensure!(state == WAIT_TIMEOUT, "进程已退出，详情结果已过期");
     Ok(())
 }
 
@@ -588,7 +598,14 @@ mod tests {
         );
         // SAFETY: only the owned test child, minimal query rights.
         let handle = OwnedProcess(
-            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, child.0.id()) }.unwrap(),
+            unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    false,
+                    child.0.id(),
+                )
+            }
+            .unwrap(),
         );
         let (mut creation, mut exit, mut kernel, mut user) = (
             FILETIME::default(),
@@ -655,7 +672,14 @@ mod tests {
         );
         // SAFETY: only the newly owned child is opened/read, no user PID.
         let handle = OwnedProcess(
-            unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, child.0.id()) }.unwrap(),
+            unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    false,
+                    child.0.id(),
+                )
+            }
+            .unwrap(),
         );
         let (mut creation, mut exit, mut kernel, mut user) = (
             FILETIME::default(),

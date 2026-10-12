@@ -32,3 +32,9 @@ pub mod network_ports;
 rust_i18n::i18n!("locales", fallback = "en-US");
 
 pub mod i18n;
+
+pub mod developer_tools;
+pub mod insights;
+pub mod process_diagnostics;
+
+pub mod launch;

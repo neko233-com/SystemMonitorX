@@ -14,7 +14,7 @@ fn capture(handle: AnyWindowHandle, cx: &mut App, path: &std::path::Path) -> Res
 
 /// Reach an action in the intentionally bounded process inspector through
 /// real wheel dispatch. Scrolling is part of using this UI at its minimum size.
-async fn click_inspector_action(
+pub(super) async fn click_inspector_action(
     handle: AnyWindowHandle,
     id: &'static str,
     directory: &std::path::Path,
@@ -120,6 +120,7 @@ pub fn start(
         let mut performance = serde_json::Value::Null;
         let mut icon_source = serde_json::Value::Null;
         let mut languages = serde_json::Value::Null;
+        let mut usability = serde_json::Value::Null;
         let result: Result<()> = async {
             std::fs::create_dir_all(&directory)?;
             let owned_tcp = std::net::TcpListener::bind("127.0.0.1:0")?;
@@ -127,6 +128,9 @@ pub fn start(
             smol::Timer::after(Duration::from_secs(6)).await;
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).snapshot.as_ref().is_some_and(|s|s.cpu_ready), "real telemetry did not arrive");
+                ensure!(view.read(cx).page == Page::Overview && view.read(cx).overview.is_some(), "default overview did not render real telemetry");
+                capture(handle,cx,&directory.join("00-overview.png"))?;
+                handle.update(cx,|_,w,cx| {w.click("nav-processes",cx);w.render_frame(cx);})?;
                 ensure!(!view.read(cx).processes.read(cx).delegate().rows.is_empty(), "no processes");
                 capture(handle,cx,&directory.join("01-processes.png"))?;
                 handle.update(cx,|_,w,cx| {w.press("ctrl-f",cx);w.input("SystemMonitorX",cx);})?;
@@ -431,12 +435,13 @@ pub fn start(
                 Ok(())
             })?;
 
+            usability = super::qa_usability::measure(handle, view.clone(), &directory, cx).await?;
             performance = super::qa_performance::measure(handle,view.clone(),cx).await?;
             languages = super::qa_locales::measure(handle, view.clone(), &directory, cx).await?;
             Ok::<(), anyhow::Error>(())
         }.await.context("native UI smoke");
         let report = match result {
-            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","performance":performance,"languages":languages,"executable_icon":icon_source,"checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","real hardware and DirectX capabilities","column chooser open/close","process tree toggle and restore","services","startup","settings","new task dialog","empty command error and cancel","minimum window size","history","Windows sessions","extended process columns","asynchronous command line and architecture","topmost toggle and restoration","native responsiveness measurement","hidden page models stay deferred","navigation catches up to live snapshot","on-demand real file signature","application grouping toggle and restore","real owned TCP/UDP ports and identity","native typed port and PID query","native UDP row context menu","port context action selects captured process","process context action queries captured PID","real executable icon from bounded background worker", "eight real native language switches, query/identity/width preservation and translated dialogs"]}),
+            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","performance":performance,"languages":languages,"executable_icon":icon_source,"usability":usability,"checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","real hardware and DirectX capabilities","column chooser open/close","process tree toggle and restore","services","startup","settings","new task dialog","empty command error and cancel","minimum window size","history","Windows sessions","extended process columns","asynchronous command line and architecture","topmost toggle and restoration","native responsiveness measurement","hidden page models stay deferred","navigation catches up to live snapshot","on-demand real file signature","application grouping toggle and restore","real owned TCP/UDP ports and identity","native typed port and PID query","native UDP row context menu","port context action selects captured process","process context action queries captured PID","real executable icon from bounded background worker", "eight real native language switches, query/identity/width preservation and translated dialogs"]}),
             Err(error) => serde_json::json!({"passed":false,"error":format!("{error:#}")}),
         };
         let _ = std::fs::write(directory.join("ui-report.json"),serde_json::to_vec_pretty(&report).unwrap());

@@ -5409,5 +5409,1005 @@
     "fr-FR": "Le flux d'événements réseau s'est arrêté",
     "es-ES": "El flujo de eventos de red se detuvo",
     "pt-BR": "O fluxo de eventos de rede foi interrompido"
+  },
+  "diagnostics.completed": {
+    "zh-CN": "已完成",
+    "en-US": "Complete",
+    "ja-JP": "完了",
+    "ko-KR": "완료",
+    "de-DE": "Vollständig",
+    "fr-FR": "Terminé",
+    "es-ES": "Completo",
+    "pt-BR": "Concluído"
+  },
+  "diagnostics.partial_data": {
+    "zh-CN": "部分数据",
+    "en-US": "Partial data",
+    "ja-JP": "一部のデータ",
+    "ko-KR": "일부 데이터",
+    "de-DE": "Teilweise Daten",
+    "fr-FR": "Données partielles",
+    "es-ES": "Datos parciales",
+    "pt-BR": "Dados parciais"
+  },
+  "diagnostics.stale_process": {
+    "zh-CN": "进程信息已过期，请刷新后重试",
+    "en-US": "Process information is out of date. Refresh and try again.",
+    "ja-JP": "プロセス情報が古くなりました。更新して再試行してください。",
+    "ko-KR": "프로세스 정보가 오래되었습니다. 새로 고친 후 다시 시도하세요.",
+    "de-DE": "Die Prozessinformationen sind veraltet. Aktualisieren und erneut versuchen.",
+    "fr-FR": "Les informations du processus sont périmées. Actualisez et réessayez.",
+    "es-ES": "La información del proceso está desactualizada. Actualice e inténtelo de nuevo.",
+    "pt-BR": "As informações do processo estão desatualizadas. Atualize e tente novamente."
+  },
+  "diagnostics.copy_powershell_query": {
+    "zh-CN": "复制 PowerShell 查询",
+    "en-US": "Copy PowerShell query",
+    "ja-JP": "PowerShell クエリをコピー",
+    "ko-KR": "PowerShell 쿼리 복사",
+    "de-DE": "PowerShell-Abfrage kopieren",
+    "fr-FR": "Copier la requête PowerShell",
+    "es-ES": "Copiar consulta de PowerShell",
+    "pt-BR": "Copiar consulta do PowerShell"
+  },
+  "diagnostics.copy_port_query": {
+    "zh-CN": "复制端口查询",
+    "en-US": "Copy port query",
+    "ja-JP": "ポートクエリをコピー",
+    "ko-KR": "포트 쿼리 복사",
+    "de-DE": "Port-Abfrage kopieren",
+    "fr-FR": "Copier la requête des ports",
+    "es-ES": "Copiar consulta de puertos",
+    "pt-BR": "Copiar consulta de portas"
+  },
+  "diagnostics.open_terminal": {
+    "zh-CN": "在程序目录打开 PowerShell",
+    "en-US": "Open PowerShell in program folder",
+    "ja-JP": "プログラムフォルダーで PowerShell を開く",
+    "ko-KR": "프로그램 폴더에서 PowerShell 열기",
+    "de-DE": "PowerShell im Programmordner öffnen",
+    "fr-FR": "Ouvrir PowerShell dans le dossier du programme",
+    "es-ES": "Abrir PowerShell en la carpeta del programa",
+    "pt-BR": "Abrir PowerShell na pasta do programa"
+  },
+  "diagnostics.export_privacy": {
+    "zh-CN": "导出不含命令行或环境变量；包含进程路径与网络地址。",
+    "en-US": "Exports omit command lines and environment variables, but include process paths and network addresses.",
+    "ja-JP": "エクスポートにはコマンドラインと環境変数は含まれません。プロセスのパスとネットワークアドレスは含まれます。",
+    "ko-KR": "내보내기에는 명령줄과 환경 변수가 포함되지 않습니다. 프로세스 경로와 네트워크 주소는 포함됩니다.",
+    "de-DE": "Exporte enthalten keine Befehlszeilen oder Umgebungsvariablen, jedoch Prozesspfade und Netzwerkadressen.",
+    "fr-FR": "Les exports excluent les lignes de commande et les variables d'environnement, mais incluent les chemins des processus et les adresses réseau.",
+    "es-ES": "Las exportaciones omiten líneas de comandos y variables de entorno, pero incluyen rutas de procesos y direcciones de red.",
+    "pt-BR": "As exportações omitem linhas de comando e variáveis de ambiente, mas incluem caminhos de processos e endereços de rede."
+  },
+  "diagnostics.loading": {
+    "zh-CN": "正在读取进程诊断…",
+    "en-US": "Reading process diagnostics…",
+    "ja-JP": "プロセス診断を読み取り中…",
+    "ko-KR": "프로세스 진단 읽는 중…",
+    "de-DE": "Prozessdiagnose wird gelesen…",
+    "fr-FR": "Lecture du diagnostic du processus…",
+    "es-ES": "Leyendo diagnóstico del proceso…",
+    "pt-BR": "Lendo diagnóstico do processo…"
+  },
+  "diagnostics.module_snapshot": {
+    "zh-CN": "模块快照",
+    "en-US": "Module snapshot",
+    "ja-JP": "モジュールのスナップショット",
+    "ko-KR": "모듈 스냅샷",
+    "de-DE": "Modul-Momentaufnahme",
+    "fr-FR": "Instantané des modules",
+    "es-ES": "Instantánea de módulos",
+    "pt-BR": "Instantâneo dos módulos"
+  },
+  "diagnostics.virtual_address_space": {
+    "zh-CN": "虚拟地址空间",
+    "en-US": "Virtual address space",
+    "ja-JP": "仮想アドレス空間",
+    "ko-KR": "가상 주소 공간",
+    "de-DE": "Virtueller Adressraum",
+    "fr-FR": "Espace d'adressage virtuel",
+    "es-ES": "Espacio de direcciones virtuales",
+    "pt-BR": "Espaço de endereços virtuais"
+  },
+  "diagnostics.memory_scope": {
+    "zh-CN": "只读采样；虚拟地址空间不等于实际驻留内存。",
+    "en-US": "Read-only sample. Virtual address space is different from resident memory.",
+    "ja-JP": "読み取り専用のサンプルです。仮想アドレス空間は実際の常駐メモリとは異なります。",
+    "ko-KR": "읽기 전용 샘플입니다. 가상 주소 공간은 실제 상주 메모리와 다릅니다.",
+    "de-DE": "Schreibgeschützte Abfrage. Virtueller Adressraum unterscheidet sich vom residenten Speicher.",
+    "fr-FR": "Échantillon en lecture seule. L'espace d'adressage virtuel diffère de la mémoire résidente.",
+    "es-ES": "Muestra de solo lectura. El espacio de direcciones virtuales difiere de la memoria residente.",
+    "pt-BR": "Amostra somente leitura. O espaço de endereços virtuais difere da memória residente."
+  },
+  "diagnostics.committed": {
+    "zh-CN": "已提交",
+    "en-US": "Committed",
+    "ja-JP": "コミット済み",
+    "ko-KR": "커밋됨",
+    "de-DE": "Zugesichert",
+    "fr-FR": "Engagé",
+    "es-ES": "Memoria comprometida",
+    "pt-BR": "Memória comprometida"
+  },
+  "diagnostics.reserved": {
+    "zh-CN": "保留",
+    "en-US": "Reserved",
+    "ja-JP": "予約済み",
+    "ko-KR": "예약됨",
+    "de-DE": "Reserviert",
+    "fr-FR": "Réservé",
+    "es-ES": "Reservado",
+    "pt-BR": "Reservado"
+  },
+  "diagnostics.executable_regions": {
+    "zh-CN": "可执行区域",
+    "en-US": "Executable regions",
+    "ja-JP": "実行可能領域",
+    "ko-KR": "실행 가능 영역",
+    "de-DE": "Ausführbare Bereiche",
+    "fr-FR": "Régions exécutables",
+    "es-ES": "Regiones ejecutables",
+    "pt-BR": "Regiões executáveis"
+  },
+  "diagnostics.loaded_modules": {
+    "zh-CN": "DLL 与已加载模块",
+    "en-US": "DLLs and loaded modules",
+    "ja-JP": "DLL と読み込み済みモジュール",
+    "ko-KR": "DLL 및 로드된 모듈",
+    "de-DE": "DLLs und geladene Module",
+    "fr-FR": "DLL et modules chargés",
+    "es-ES": "DLL y módulos cargados",
+    "pt-BR": "DLLs e módulos carregados"
+  },
+  "diagnostics.notes": {
+    "zh-CN": "诊断说明",
+    "en-US": "Diagnostic notes",
+    "ja-JP": "診断の注記",
+    "ko-KR": "진단 참고 사항",
+    "de-DE": "Diagnosehinweise",
+    "fr-FR": "Notes de diagnostic",
+    "es-ES": "Notas de diagnóstico",
+    "pt-BR": "Notas de diagnóstico"
+  },
+  "diagnostics.process_tools": {
+    "zh-CN": "进程工具",
+    "en-US": "Process tools",
+    "ja-JP": "プロセスツール",
+    "ko-KR": "프로세스 도구",
+    "de-DE": "Prozesswerkzeuge",
+    "fr-FR": "Outils du processus",
+    "es-ES": "Herramientas del proceso",
+    "pt-BR": "Ferramentas do processo"
+  },
+  "diagnostics.copy_json": {
+    "zh-CN": "复制诊断 JSON",
+    "en-US": "Copy diagnostic JSON",
+    "ja-JP": "診断 JSON をコピー",
+    "ko-KR": "진단 JSON 복사",
+    "de-DE": "Diagnose-JSON kopieren",
+    "fr-FR": "Copier le diagnostic JSON",
+    "es-ES": "Copiar diagnóstico JSON",
+    "pt-BR": "Copiar diagnóstico JSON"
+  },
+  "diagnostics.save_json": {
+    "zh-CN": "保存诊断 JSON",
+    "en-US": "Save diagnostic JSON",
+    "ja-JP": "診断 JSON を保存",
+    "ko-KR": "진단 JSON 저장",
+    "de-DE": "Diagnose-JSON speichern",
+    "fr-FR": "Enregistrer le diagnostic JSON",
+    "es-ES": "Guardar diagnóstico JSON",
+    "pt-BR": "Salvar diagnóstico JSON"
+  },
+  "diagnostics.read_failed": {
+    "zh-CN": "诊断读取失败：%{error}",
+    "en-US": "Could not read diagnostics: %{error}",
+    "ja-JP": "診断を読み取れませんでした：%{error}",
+    "ko-KR": "진단을 읽을 수 없습니다: %{error}",
+    "de-DE": "Diagnose konnte nicht gelesen werden: %{error}",
+    "fr-FR": "Impossible de lire le diagnostic : %{error}",
+    "es-ES": "No se pudo leer el diagnóstico: %{error}",
+    "pt-BR": "Não foi possível ler o diagnóstico: %{error}"
+  },
+  "diagnostics.query_command": {
+    "zh-CN": "查询命令",
+    "en-US": "Query command",
+    "ja-JP": "クエリコマンド",
+    "ko-KR": "쿼리 명령",
+    "de-DE": "Abfragebefehl",
+    "fr-FR": "Commande de requête",
+    "es-ES": "Comando de consulta",
+    "pt-BR": "Comando de consulta"
+  },
+  "diagnostics.opening_powershell": {
+    "zh-CN": "正在打开 PowerShell",
+    "en-US": "Opening PowerShell",
+    "ja-JP": "PowerShell を開いています",
+    "ko-KR": "PowerShell 여는 중",
+    "de-DE": "PowerShell wird geöffnet",
+    "fr-FR": "Ouverture de PowerShell",
+    "es-ES": "Abriendo PowerShell",
+    "pt-BR": "Abrindo PowerShell"
+  },
+  "diagnostics.terminal_opened": {
+    "zh-CN": "已打开程序目录的 PowerShell",
+    "en-US": "Opened PowerShell in the program folder",
+    "ja-JP": "プログラムフォルダーで PowerShell を開きました",
+    "ko-KR": "프로그램 폴더에서 PowerShell을 열었습니다",
+    "de-DE": "PowerShell im Programmordner geöffnet",
+    "fr-FR": "PowerShell ouvert dans le dossier du programme",
+    "es-ES": "PowerShell abierto en la carpeta del programa",
+    "pt-BR": "PowerShell aberto na pasta do programa"
+  },
+  "diagnostics.saved_to": {
+    "zh-CN": "进程诊断已保存：%{path}",
+    "en-US": "Process diagnostics saved: %{path}",
+    "ja-JP": "プロセス診断を保存しました：%{path}",
+    "ko-KR": "프로세스 진단 저장됨: %{path}",
+    "de-DE": "Prozessdiagnose gespeichert: %{path}",
+    "fr-FR": "Diagnostic du processus enregistré : %{path}",
+    "es-ES": "Diagnóstico del proceso guardado: %{path}",
+    "pt-BR": "Diagnóstico do processo salvo: %{path}"
+  },
+  "diagnostics.json_report": {
+    "zh-CN": "进程诊断 JSON",
+    "en-US": "Process diagnostic JSON",
+    "ja-JP": "プロセス診断 JSON",
+    "ko-KR": "프로세스 진단 JSON",
+    "de-DE": "Prozessdiagnose-JSON",
+    "fr-FR": "Diagnostic du processus JSON",
+    "es-ES": "Diagnóstico del proceso JSON",
+    "pt-BR": "Diagnóstico do processo JSON"
+  },
+  "nav.overview": {
+    "zh-CN": "概览",
+    "en-US": "Overview",
+    "ja-JP": "概要",
+    "ko-KR": "개요",
+    "de-DE": "Übersicht",
+    "fr-FR": "Vue d'ensemble",
+    "es-ES": "Vista general",
+    "pt-BR": "Visão geral"
+  },
+  "quick.search": {
+    "zh-CN": "搜索页面或操作",
+    "en-US": "Search pages or actions",
+    "ja-JP": "ページまたは操作を検索",
+    "ko-KR": "페이지 또는 작업 검색",
+    "de-DE": "Seiten oder Aktionen suchen",
+    "fr-FR": "Rechercher une page ou une action",
+    "es-ES": "Buscar páginas o acciones",
+    "pt-BR": "Pesquisar páginas ou ações"
+  },
+  "quick.actions": {
+    "zh-CN": "快捷操作",
+    "en-US": "Quick actions",
+    "ja-JP": "クイック操作",
+    "ko-KR": "빠른 작업",
+    "de-DE": "Schnellaktionen",
+    "fr-FR": "Actions rapides",
+    "es-ES": "Acciones rápidas",
+    "pt-BR": "Ações rápidas"
+  },
+  "help.title": {
+    "zh-CN": "使用帮助",
+    "en-US": "Help",
+    "ja-JP": "ヘルプ",
+    "ko-KR": "도움말",
+    "de-DE": "Hilfe",
+    "fr-FR": "Aide",
+    "es-ES": "Ayuda",
+    "pt-BR": "Ajuda"
+  },
+  "quick.no_matches": {
+    "zh-CN": "没有匹配的操作",
+    "en-US": "No matching actions",
+    "ja-JP": "一致する操作はありません",
+    "ko-KR": "일치하는 작업 없음",
+    "de-DE": "Keine passenden Aktionen",
+    "fr-FR": "Aucune action correspondante",
+    "es-ES": "No hay acciones coincidentes",
+    "pt-BR": "Nenhuma ação correspondente"
+  },
+  "help.start_here": {
+    "zh-CN": "先看概览，再看进程",
+    "en-US": "Start with Overview, then Processes",
+    "ja-JP": "概要を確認してからプロセスへ",
+    "ko-KR": "개요를 확인한 후 프로세스를 보세요",
+    "de-DE": "Zuerst Übersicht, dann Prozesse",
+    "fr-FR": "Commencez par la vue d'ensemble, puis les processus",
+    "es-ES": "Empiece por Vista general y luego Procesos",
+    "pt-BR": "Comece pela Visão geral e depois Processos"
+  },
+  "help.overview_intro": {
+    "zh-CN": "概览显示本次采样的资源占用与主要使用者。点击进程可继续查看路径、端口和详细信息。",
+    "en-US": "Overview shows resource usage and the main users in this sample. Select a process to view its path, ports and details.",
+    "ja-JP": "概要には今回のサンプルのリソース使用率と主な使用プロセスが表示されます。プロセスを選択すると、パス、ポート、詳細を確認できます。",
+    "ko-KR": "개요에는 이번 샘플의 리소스 사용량과 주요 사용 프로세스가 표시됩니다. 프로세스를 선택하면 경로, 포트 및 세부 정보를 볼 수 있습니다.",
+    "de-DE": "Die Übersicht zeigt Ressourcennutzung und Hauptverbraucher dieser Abfrage. Wählen Sie einen Prozess für Pfad, Ports und Details.",
+    "fr-FR": "La vue d'ensemble affiche l'utilisation des ressources et les principaux utilisateurs de cet échantillon. Sélectionnez un processus pour voir son chemin, ses ports et ses détails.",
+    "es-ES": "La vista general muestra el uso de recursos y los principales consumidores de esta muestra. Seleccione un proceso para ver su ruta, puertos y detalles.",
+    "pt-BR": "A visão geral mostra o uso de recursos e os principais consumidores desta amostra. Selecione um processo para ver o caminho, as portas e os detalhes."
+  },
+  "help.quick_queries": {
+    "zh-CN": "快速查询",
+    "en-US": "Quick queries",
+    "ja-JP": "クイック検索",
+    "ko-KR": "빠른 쿼리",
+    "de-DE": "Schnelle Abfragen",
+    "fr-FR": "Requêtes rapides",
+    "es-ES": "Consultas rápidas",
+    "pt-BR": "Consultas rápidas"
+  },
+  "help.exact_pid": {
+    "zh-CN": "精确进程 PID",
+    "en-US": "Exact process PID",
+    "ja-JP": "正確なプロセス PID",
+    "ko-KR": "정확한 프로세스 PID",
+    "de-DE": "Exakte Prozess-PID",
+    "fr-FR": "PID exact du processus",
+    "es-ES": "PID exacto del proceso",
+    "pt-BR": "PID exato do processo"
+  },
+  "help.name_prefix": {
+    "zh-CN": "进程名称前缀",
+    "en-US": "Process name prefix",
+    "ja-JP": "プロセス名の先頭一致",
+    "ko-KR": "프로세스 이름 접두사",
+    "de-DE": "Präfix des Prozessnamens",
+    "fr-FR": "Préfixe du nom du processus",
+    "es-ES": "Prefijo del nombre del proceso",
+    "pt-BR": "Prefixo do nome do processo"
+  },
+  "help.path_contains": {
+    "zh-CN": "程序路径包含文字",
+    "en-US": "Text contained in program path",
+    "ja-JP": "プログラムのパスに含まれる文字",
+    "ko-KR": "프로그램 경로에 포함된 텍스트",
+    "de-DE": "Text im Programmpfad",
+    "fr-FR": "Texte contenu dans le chemin du programme",
+    "es-ES": "Texto contenido en la ruta del programa",
+    "pt-BR": "Texto contido no caminho do programa"
+  },
+  "help.local_remote_port": {
+    "zh-CN": "本地或远端端口",
+    "en-US": "Local or remote port",
+    "ja-JP": "ローカルまたはリモートのポート",
+    "ko-KR": "로컬 또는 원격 포트",
+    "de-DE": "Lokaler oder entfernter Port",
+    "fr-FR": "Port local ou distant",
+    "es-ES": "Puerto local o remoto",
+    "pt-BR": "Porta local ou remota"
+  },
+  "help.port_protocol": {
+    "zh-CN": "端口协议",
+    "en-US": "Port protocol",
+    "ja-JP": "ポートのプロトコル",
+    "ko-KR": "포트 프로토콜",
+    "de-DE": "Port-Protokoll",
+    "fr-FR": "Protocole du port",
+    "es-ES": "Protocolo del puerto",
+    "pt-BR": "Protocolo da porta"
+  },
+  "help.shortcuts": {
+    "zh-CN": "常用快捷键",
+    "en-US": "Keyboard shortcuts",
+    "ja-JP": "キーボードショートカット",
+    "ko-KR": "키보드 단축키",
+    "de-DE": "Tastenkombinationen",
+    "fr-FR": "Raccourcis clavier",
+    "es-ES": "Atajos de teclado",
+    "pt-BR": "Atalhos de teclado"
+  },
+  "help.data_and_actions": {
+    "zh-CN": "结束进程可能丢失未保存内容。字段显示 — 表示未取得数据；部分信息需要管理员权限或驱动支持。",
+    "en-US": "Ending a process may lose unsaved work. — means data is unavailable. Some information needs administrator privileges or driver support.",
+    "ja-JP": "プロセスを終了すると未保存の内容が失われる場合があります。— はデータが取得できないことを示します。一部の情報には管理者権限やドライバーの対応が必要です。",
+    "ko-KR": "프로세스를 종료하면 저장하지 않은 작업이 손실될 수 있습니다. — 는 데이터를 가져올 수 없음을 뜻합니다. 일부 정보에는 관리자 권한 또는 드라이버 지원이 필요합니다.",
+    "de-DE": "Beim Beenden eines Prozesses können ungespeicherte Daten verloren gehen. — bedeutet, dass Daten nicht verfügbar sind. Einige Informationen erfordern Administratorrechte oder Treiberunterstützung.",
+    "fr-FR": "Terminer un processus peut faire perdre le travail non enregistré. — indique une donnée indisponible. Certaines informations nécessitent des droits d'administrateur ou un pilote compatible.",
+    "es-ES": "Al finalizar un proceso puede perderse trabajo sin guardar. — indica que los datos no están disponibles. Parte de la información requiere privilegios de administrador o compatibilidad del controlador.",
+    "pt-BR": "Encerrar um processo pode causar perda de trabalho não salvo. — indica dados indisponíveis. Algumas informações exigem privilégios de administrador ou suporte do driver."
+  },
+  "search.save": {
+    "zh-CN": "保存查询",
+    "en-US": "Save query",
+    "ja-JP": "検索を保存",
+    "ko-KR": "쿼리 저장",
+    "de-DE": "Abfrage speichern",
+    "fr-FR": "Enregistrer la requête",
+    "es-ES": "Guardar consulta",
+    "pt-BR": "Salvar consulta"
+  },
+  "search.delete_saved": {
+    "zh-CN": "删除保存的查询",
+    "en-US": "Delete saved query",
+    "ja-JP": "保存した検索を削除",
+    "ko-KR": "저장된 쿼리 삭제",
+    "de-DE": "Gespeicherte Abfrage löschen",
+    "fr-FR": "Supprimer la requête enregistrée",
+    "es-ES": "Eliminar consulta guardada",
+    "pt-BR": "Excluir consulta salva"
+  },
+  "overview.current_usage": {
+    "zh-CN": "当前占用",
+    "en-US": "Current usage",
+    "ja-JP": "現在の使用率",
+    "ko-KR": "현재 사용량",
+    "de-DE": "Aktuelle Nutzung",
+    "fr-FR": "Utilisation actuelle",
+    "es-ES": "Uso actual",
+    "pt-BR": "Uso atual"
+  },
+  "overview.high_usage": {
+    "zh-CN": "占用较高",
+    "en-US": "High usage",
+    "ja-JP": "使用率が高い",
+    "ko-KR": "사용량 높음",
+    "de-DE": "Hohe Nutzung",
+    "fr-FR": "Utilisation élevée",
+    "es-ES": "Uso elevado",
+    "pt-BR": "Uso elevado"
+  },
+  "overview.very_high_usage": {
+    "zh-CN": "占用很高",
+    "en-US": "Very high usage",
+    "ja-JP": "使用率が非常に高い",
+    "ko-KR": "사용량 매우 높음",
+    "de-DE": "Sehr hohe Nutzung",
+    "fr-FR": "Utilisation très élevée",
+    "es-ES": "Uso muy elevado",
+    "pt-BR": "Uso muito elevado"
+  },
+  "overview.paused_snapshot": {
+    "zh-CN": "已暂停：当前显示的是采样快照",
+    "en-US": "Paused: showing a captured sample",
+    "ja-JP": "一時停止中：取得したサンプルを表示しています",
+    "ko-KR": "일시 정지됨: 캡처한 샘플 표시 중",
+    "de-DE": "Pausiert: Gespeicherte Abfrage wird angezeigt",
+    "fr-FR": "En pause : affichage d'un échantillon capturé",
+    "es-ES": "En pausa: mostrando una muestra capturada",
+    "pt-BR": "Pausado: exibindo uma amostra capturada"
+  },
+  "overview.intro": {
+    "zh-CN": "本次资源占用，帮助你决定接下来查看哪里。",
+    "en-US": "Resource usage in this sample helps you choose what to inspect next.",
+    "ja-JP": "今回のリソース使用率を確認して、次に調べる項目を選べます。",
+    "ko-KR": "이번 샘플의 리소스 사용량을 보고 다음에 확인할 항목을 선택하세요.",
+    "de-DE": "Die Ressourcennutzung dieser Abfrage hilft Ihnen, den nächsten Prüfschritt zu wählen.",
+    "fr-FR": "L'utilisation des ressources de cet échantillon vous aide à choisir quoi examiner ensuite.",
+    "es-ES": "El uso de recursos de esta muestra le ayuda a elegir qué revisar después.",
+    "pt-BR": "O uso de recursos desta amostra ajuda a escolher o que examinar em seguida."
+  },
+  "overview.top_cpu": {
+    "zh-CN": "CPU 占用最多",
+    "en-US": "Top CPU processes",
+    "ja-JP": "CPU 使用率の上位",
+    "ko-KR": "CPU 사용량 상위",
+    "de-DE": "Höchste CPU-Nutzung",
+    "fr-FR": "Processus utilisant le plus le CPU",
+    "es-ES": "Mayor uso de CPU",
+    "pt-BR": "Maior uso de CPU"
+  },
+  "overview.top_memory": {
+    "zh-CN": "内存占用最多",
+    "en-US": "Top memory processes",
+    "ja-JP": "メモリ使用量の上位",
+    "ko-KR": "메모리 사용량 상위",
+    "de-DE": "Höchste Speichernutzung",
+    "fr-FR": "Processus utilisant le plus de mémoire",
+    "es-ES": "Mayor uso de memoria",
+    "pt-BR": "Maior uso de memória"
+  },
+  "overview.low_disk_space": {
+    "zh-CN": "可用磁盘空间较少",
+    "en-US": "Low available disk space",
+    "ja-JP": "ディスクの空き容量が少ない",
+    "ko-KR": "디스크 여유 공간 부족",
+    "de-DE": "Wenig freier Speicherplatz",
+    "fr-FR": "Peu d'espace disque disponible",
+    "es-ES": "Poco espacio disponible en disco",
+    "pt-BR": "Pouco espaço disponível em disco"
+  },
+  "overview.scope_note": {
+    "zh-CN": "资源高占用不等于故障。这里反映采样负载，不会自动结束进程或清理内存。",
+    "en-US": "High resource usage does not necessarily mean a problem. This view shows sampled load and never ends processes or clears memory automatically.",
+    "ja-JP": "リソース使用率が高くても、必ずしも異常とは限りません。ここには取得した負荷が表示され、プロセスの終了やメモリの解放は自動で行いません。",
+    "ko-KR": "리소스 사용량이 높다고 반드시 문제가 있는 것은 아닙니다. 이 화면은 샘플링된 부하를 표시하며 프로세스 종료나 메모리 정리를 자동으로 하지 않습니다.",
+    "de-DE": "Hohe Ressourcennutzung bedeutet nicht unbedingt eine Störung. Diese Ansicht zeigt die gemessene Last und beendet keine Prozesse oder leert Speicher automatisch.",
+    "fr-FR": "Une utilisation élevée des ressources ne signifie pas forcément un problème. Cette vue affiche la charge échantillonnée sans terminer de processus ni libérer de mémoire automatiquement.",
+    "es-ES": "Un uso elevado de recursos no implica necesariamente un problema. Esta vista muestra la carga muestreada y nunca finaliza procesos ni limpia la memoria automáticamente.",
+    "pt-BR": "O uso elevado de recursos não indica necessariamente um problema. Esta tela mostra a carga amostrada e nunca encerra processos nem limpa a memória automaticamente."
+  },
+  "settings.common_columns": {
+    "zh-CN": "常用列",
+    "en-US": "Common columns",
+    "ja-JP": "よく使う列",
+    "ko-KR": "자주 쓰는 열",
+    "de-DE": "Häufige Spalten",
+    "fr-FR": "Colonnes courantes",
+    "es-ES": "Columnas habituales",
+    "pt-BR": "Colunas comuns"
+  },
+  "settings.all_columns": {
+    "zh-CN": "全部列",
+    "en-US": "All columns",
+    "ja-JP": "すべての列",
+    "ko-KR": "모든 열",
+    "de-DE": "Alle Spalten",
+    "fr-FR": "Toutes les colonnes",
+    "es-ES": "Todas las columnas",
+    "pt-BR": "Todas as colunas"
+  },
+  "settings.interval_5s": {
+    "zh-CN": "5 秒",
+    "en-US": "5 seconds",
+    "ja-JP": "5 秒",
+    "ko-KR": "5초",
+    "de-DE": "5 Sekunden",
+    "fr-FR": "5 secondes",
+    "es-ES": "5 segundos",
+    "pt-BR": "5 segundos"
+  },
+  "settings.start_page": {
+    "zh-CN": "启动页",
+    "en-US": "Start page",
+    "ja-JP": "起動時のページ",
+    "ko-KR": "시작 페이지",
+    "de-DE": "Startseite",
+    "fr-FR": "Page de démarrage",
+    "es-ES": "Página de inicio",
+    "pt-BR": "Página inicial"
+  },
+  "diagnostics.memory.unallocated": {
+    "zh-CN": "未分配",
+    "en-US": "Unallocated",
+    "ja-JP": "未割り当て",
+    "ko-KR": "할당되지 않음",
+    "de-DE": "Nicht zugewiesen",
+    "fr-FR": "Non alloué",
+    "es-ES": "Sin asignar",
+    "pt-BR": "Não alocado"
+  },
+  "diagnostics.memory.private": {
+    "zh-CN": "私有",
+    "en-US": "Private",
+    "ja-JP": "プライベート",
+    "ko-KR": "개인",
+    "de-DE": "Privat",
+    "fr-FR": "Privé",
+    "es-ES": "Privada",
+    "pt-BR": "Privada"
+  },
+  "diagnostics.memory.mapped": {
+    "zh-CN": "映射",
+    "en-US": "Mapped",
+    "ja-JP": "マップ済み",
+    "ko-KR": "매핑됨",
+    "de-DE": "Abgebildet",
+    "fr-FR": "Mappé",
+    "es-ES": "Mapeada",
+    "pt-BR": "Mapeada"
+  },
+  "diagnostics.memory.image": {
+    "zh-CN": "映像",
+    "en-US": "Image",
+    "ja-JP": "イメージ",
+    "ko-KR": "이미지",
+    "de-DE": "Abbild",
+    "fr-FR": "Image",
+    "es-ES": "Imagen",
+    "pt-BR": "Imagem"
+  },
+  "diagnostics.memory.allowed": {
+    "zh-CN": "允许",
+    "en-US": "Allowed",
+    "ja-JP": "許可",
+    "ko-KR": "허용",
+    "de-DE": "Erlaubt",
+    "fr-FR": "Autorisé",
+    "es-ES": "Permitido",
+    "pt-BR": "Permitido"
+  },
+  "diagnostics.memory.denied": {
+    "zh-CN": "不允许",
+    "en-US": "Not allowed",
+    "ja-JP": "不可",
+    "ko-KR": "허용되지 않음",
+    "de-DE": "Nicht erlaubt",
+    "fr-FR": "Non autorisé",
+    "es-ES": "No permitido",
+    "pt-BR": "Não permitido"
+  },
+  "diagnostics.memory.guarded": {
+    "zh-CN": "防护页",
+    "en-US": "Guarded",
+    "ja-JP": "ガードページ",
+    "ko-KR": "보호 페이지",
+    "de-DE": "Überwachte Seite",
+    "fr-FR": "Page de garde",
+    "es-ES": "Página de protección",
+    "pt-BR": "Página de proteção"
+  },
+  "diagnostics.memory.not_applicable": {
+    "zh-CN": "不适用",
+    "en-US": "Not applicable",
+    "ja-JP": "該当なし",
+    "ko-KR": "해당 없음",
+    "de-DE": "Nicht zutreffend",
+    "fr-FR": "Sans objet",
+    "es-ES": "No aplicable",
+    "pt-BR": "Não aplicável"
+  },
+  "diagnostics.note.module_scope": {
+    "zh-CN": "模块列表不包含仅作为数据文件加载的映像。",
+    "en-US": "The module list excludes images loaded only as data files.",
+    "ja-JP": "モジュール一覧には、データファイルとしてのみ読み込まれたイメージは含まれません。",
+    "ko-KR": "모듈 목록에는 데이터 파일로만 로드된 이미지가 포함되지 않습니다.",
+    "de-DE": "Die Modulliste enthält keine Abbilder, die nur als Datendateien geladen wurden.",
+    "fr-FR": "La liste des modules exclut les images chargées uniquement comme fichiers de données.",
+    "es-ES": "La lista de módulos excluye las imágenes cargadas solo como archivos de datos.",
+    "pt-BR": "A lista de módulos exclui imagens carregadas apenas como arquivos de dados."
+  },
+  "diagnostics.note.wow64": {
+    "zh-CN": "已同时请求 32 位和 64 位模块快照。",
+    "en-US": "Both 32-bit and 64-bit module snapshots were requested.",
+    "ja-JP": "32 ビットと 64 ビット両方のモジュールスナップショットを要求しました。",
+    "ko-KR": "32비트 및 64비트 모듈 스냅샷을 모두 요청했습니다.",
+    "de-DE": "Modul-Momentaufnahmen für 32 und 64 Bit wurden angefordert.",
+    "fr-FR": "Des instantanés des modules 32 et 64 bits ont été demandés.",
+    "es-ES": "Se solicitaron instantáneas de módulos de 32 y 64 bits.",
+    "pt-BR": "Foram solicitados instantâneos de módulos de 32 e 64 bits."
+  },
+  "diagnostics.note.architecture_unavailable": {
+    "zh-CN": "无法读取进程架构。",
+    "en-US": "The process architecture could not be read.",
+    "ja-JP": "プロセスのアーキテクチャを読み取れませんでした。",
+    "ko-KR": "프로세스 아키텍처를 읽을 수 없습니다.",
+    "de-DE": "Die Prozessarchitektur konnte nicht gelesen werden.",
+    "fr-FR": "L'architecture du processus n'a pas pu être lue.",
+    "es-ES": "No se pudo leer la arquitectura del proceso.",
+    "pt-BR": "Não foi possível ler a arquitetura do processo."
+  },
+  "diagnostics.note.module_snapshot_failed": {
+    "zh-CN": "无法读取模块快照。",
+    "en-US": "The module snapshot could not be read.",
+    "ja-JP": "モジュールのスナップショットを読み取れませんでした。",
+    "ko-KR": "모듈 스냅샷을 읽을 수 없습니다.",
+    "de-DE": "Die Modul-Momentaufnahme konnte nicht gelesen werden.",
+    "fr-FR": "L'instantané des modules n'a pas pu être lu.",
+    "es-ES": "No se pudo leer la instantánea de módulos.",
+    "pt-BR": "Não foi possível ler o instantâneo dos módulos."
+  },
+  "diagnostics.note.module_interrupted": {
+    "zh-CN": "模块读取中断，当前列表可能不完整。",
+    "en-US": "Module reading stopped. The list may be incomplete.",
+    "ja-JP": "モジュールの読み取りが中断されました。一覧が不完全な可能性があります。",
+    "ko-KR": "모듈 읽기가 중단되었습니다. 목록이 불완전할 수 있습니다.",
+    "de-DE": "Das Lesen der Module wurde unterbrochen. Die Liste ist möglicherweise unvollständig.",
+    "fr-FR": "La lecture des modules s'est interrompue. La liste peut être incomplète.",
+    "es-ES": "La lectura de módulos se interrumpió. La lista puede estar incompleta.",
+    "pt-BR": "A leitura dos módulos foi interrompida. A lista pode estar incompleta."
+  },
+  "diagnostics.note.module_changing": {
+    "zh-CN": "模块列表正在变化，请稍后刷新。",
+    "en-US": "The module list is changing. Refresh shortly.",
+    "ja-JP": "モジュール一覧が変化しています。少し待ってから更新してください。",
+    "ko-KR": "모듈 목록이 변경 중입니다. 잠시 후 새로 고치세요.",
+    "de-DE": "Die Modulliste ändert sich gerade. Aktualisieren Sie in Kürze.",
+    "fr-FR": "La liste des modules est en cours de modification. Actualisez dans un instant.",
+    "es-ES": "La lista de módulos está cambiando. Actualice en un momento.",
+    "pt-BR": "A lista de módulos está mudando. Atualize em instantes."
+  },
+  "diagnostics.note.module_limit": {
+    "zh-CN": "模块数量达到读取上限，当前列表为部分数据。",
+    "en-US": "The module limit was reached. The list contains partial data.",
+    "ja-JP": "モジュール数が読み取り上限に達しました。一覧には一部のデータが表示されています。",
+    "ko-KR": "모듈 수가 읽기 한도에 도달했습니다. 목록에는 일부 데이터만 포함됩니다.",
+    "de-DE": "Die Modulgrenze wurde erreicht. Die Liste enthält nur einen Teil der Daten.",
+    "fr-FR": "La limite de modules a été atteinte. La liste contient des données partielles.",
+    "es-ES": "Se alcanzó el límite de módulos. La lista contiene datos parciales.",
+    "pt-BR": "O limite de módulos foi atingido. A lista contém dados parciais."
+  },
+  "diagnostics.note.memory_limit": {
+    "zh-CN": "内存区域达到读取上限，汇总只包含已读取部分。",
+    "en-US": "The memory region limit was reached. Totals cover only the regions read.",
+    "ja-JP": "メモリ領域の読み取り上限に達しました。集計には読み取り済みの領域のみが含まれます。",
+    "ko-KR": "메모리 영역 읽기 한도에 도달했습니다. 합계에는 읽은 영역만 포함됩니다.",
+    "de-DE": "Die Grenze für Speicherbereiche wurde erreicht. Summen enthalten nur gelesene Bereiche.",
+    "fr-FR": "La limite de régions mémoire a été atteinte. Les totaux couvrent uniquement les régions lues.",
+    "es-ES": "Se alcanzó el límite de regiones de memoria. Los totales solo incluyen las regiones leídas.",
+    "pt-BR": "O limite de regiões de memória foi atingido. Os totais incluem apenas as regiões lidas."
+  },
+  "diagnostics.note.time_limit": {
+    "zh-CN": "读取达到时间上限，当前结果可能不完整。",
+    "en-US": "The read time limit was reached. Results may be incomplete.",
+    "ja-JP": "読み取り時間の上限に達しました。結果が不完全な可能性があります。",
+    "ko-KR": "읽기 시간 한도에 도달했습니다. 결과가 불완전할 수 있습니다.",
+    "de-DE": "Das Zeitlimit für die Abfrage wurde erreicht. Ergebnisse sind möglicherweise unvollständig.",
+    "fr-FR": "Le délai de lecture a été atteint. Les résultats peuvent être incomplets.",
+    "es-ES": "Se alcanzó el límite de tiempo de lectura. Los resultados pueden estar incompletos.",
+    "pt-BR": "O limite de tempo de leitura foi atingido. Os resultados podem estar incompletos."
+  },
+  "diagnostics.note.cross_bitness": {
+    "zh-CN": "进程架构或系统读取限制使此数据不可用。",
+    "en-US": "The process architecture or system read restrictions make this data unavailable.",
+    "ja-JP": "プロセスのアーキテクチャまたはシステムの読み取り制限により、このデータは利用できません。",
+    "ko-KR": "프로세스 아키텍처 또는 시스템 읽기 제한으로 이 데이터를 사용할 수 없습니다.",
+    "de-DE": "Prozessarchitektur oder Systembeschränkungen verhindern diese Abfrage.",
+    "fr-FR": "L'architecture du processus ou les restrictions de lecture du système rendent ces données indisponibles.",
+    "es-ES": "La arquitectura del proceso o las restricciones de lectura del sistema impiden obtener estos datos.",
+    "pt-BR": "A arquitetura do processo ou as restrições de leitura do sistema tornam estes dados indisponíveis."
+  },
+  "diagnostics.note.module_path_short": {
+    "zh-CN": "部分模块路径可能被截短；JSON 保留原始字符。",
+    "en-US": "Some module paths may be truncated. JSON retains the original characters.",
+    "ja-JP": "一部のモジュールパスが切り詰められている可能性があります。JSON には元の文字が保持されます。",
+    "ko-KR": "일부 모듈 경로가 잘렸을 수 있습니다. JSON은 원래 문자를 보존합니다.",
+    "de-DE": "Einige Modulpfade können abgeschnitten sein. JSON bewahrt die ursprünglichen Zeichen.",
+    "fr-FR": "Certains chemins de modules peuvent être tronqués. Le JSON conserve les caractères d'origine.",
+    "es-ES": "Algunas rutas de módulos pueden estar truncadas. JSON conserva los caracteres originales.",
+    "pt-BR": "Alguns caminhos de módulos podem estar truncados. O JSON mantém os caracteres originais."
+  },
+  "diagnostics.note.module_identity": {
+    "zh-CN": "模块身份不匹配，已停止读取。",
+    "en-US": "The module identity does not match. Reading stopped.",
+    "ja-JP": "モジュールの識別情報が一致しないため、読み取りを停止しました。",
+    "ko-KR": "모듈 식별 정보가 일치하지 않아 읽기를 중단했습니다.",
+    "de-DE": "Die Modulidentität stimmt nicht überein. Das Lesen wurde gestoppt.",
+    "fr-FR": "L'identité du module ne correspond pas. La lecture a été arrêtée.",
+    "es-ES": "La identidad del módulo no coincide. Se detuvo la lectura.",
+    "pt-BR": "A identidade do módulo não corresponde. A leitura foi interrompida."
+  },
+  "diagnostics.note.memory_access": {
+    "zh-CN": "无法读取虚拟内存信息，访问权限可能不足。",
+    "en-US": "Virtual memory information could not be read. Access permissions may be insufficient.",
+    "ja-JP": "仮想メモリ情報を読み取れませんでした。アクセス権限が不足している可能性があります。",
+    "ko-KR": "가상 메모리 정보를 읽을 수 없습니다. 액세스 권한이 부족할 수 있습니다.",
+    "de-DE": "Virtuelle Speicherinformationen konnten nicht gelesen werden. Zugriffsrechte reichen möglicherweise nicht aus.",
+    "fr-FR": "Les informations de mémoire virtuelle n'ont pas pu être lues. Les droits d'accès peuvent être insuffisants.",
+    "es-ES": "No se pudo leer la información de memoria virtual. Los permisos de acceso pueden ser insuficientes.",
+    "pt-BR": "Não foi possível ler as informações de memória virtual. As permissões de acesso podem ser insuficientes."
+  },
+  "diagnostics.note.memory_query": {
+    "zh-CN": "内存区域读取失败，汇总可能不完整。",
+    "en-US": "Memory region reading failed. Totals may be incomplete.",
+    "ja-JP": "メモリ領域の読み取りに失敗しました。集計が不完全な可能性があります。",
+    "ko-KR": "메모리 영역 읽기에 실패했습니다. 합계가 불완전할 수 있습니다.",
+    "de-DE": "Speicherbereiche konnten nicht gelesen werden. Summen sind möglicherweise unvollständig.",
+    "fr-FR": "La lecture des régions mémoire a échoué. Les totaux peuvent être incomplets.",
+    "es-ES": "Falló la lectura de regiones de memoria. Los totales pueden estar incompletos.",
+    "pt-BR": "A leitura das regiões de memória falhou. Os totais podem estar incompletos."
+  },
+  "diagnostics.note.memory_invalid": {
+    "zh-CN": "系统返回的内存区域无效，已停止读取。",
+    "en-US": "The system returned an invalid memory region. Reading stopped.",
+    "ja-JP": "システムから無効なメモリ領域が返されたため、読み取りを停止しました。",
+    "ko-KR": "시스템이 잘못된 메모리 영역을 반환하여 읽기를 중단했습니다.",
+    "de-DE": "Das System lieferte einen ungültigen Speicherbereich. Das Lesen wurde gestoppt.",
+    "fr-FR": "Le système a renvoyé une région mémoire invalide. La lecture a été arrêtée.",
+    "es-ES": "El sistema devolvió una región de memoria no válida. Se detuvo la lectura.",
+    "pt-BR": "O sistema retornou uma região de memória inválida. A leitura foi interrompida."
+  },
+  "diagnostics.note.summary_overflow": {
+    "zh-CN": "内存统计超出范围，已停止汇总。",
+    "en-US": "Memory totals exceeded the supported range. Aggregation stopped.",
+    "ja-JP": "メモリ統計が対応範囲を超えたため、集計を停止しました。",
+    "ko-KR": "메모리 합계가 지원 범위를 초과하여 집계를 중단했습니다.",
+    "de-DE": "Speichersummen überschritten den unterstützten Bereich. Die Summierung wurde gestoppt.",
+    "fr-FR": "Les totaux mémoire ont dépassé la plage prise en charge. Le calcul a été arrêté.",
+    "es-ES": "Los totales de memoria excedieron el rango admitido. Se detuvo el cálculo.",
+    "pt-BR": "Os totais de memória excederam o intervalo suportado. O cálculo foi interrompido."
+  },
+  "diagnostics.note.sequential_snapshot": {
+    "zh-CN": "内存区域按顺序读取；进程仍在运行，结果不是冻结快照。",
+    "en-US": "Memory regions are read in sequence while the process runs. This is not a frozen snapshot.",
+    "ja-JP": "プロセスの実行中にメモリ領域を順番に読み取ります。凍結したスナップショットではありません。",
+    "ko-KR": "프로세스가 실행되는 동안 메모리 영역을 순서대로 읽습니다. 고정된 스냅샷이 아닙니다.",
+    "de-DE": "Speicherbereiche werden während der Prozessausführung nacheinander gelesen. Dies ist keine eingefrorene Momentaufnahme.",
+    "fr-FR": "Les régions mémoire sont lues successivement pendant l'exécution du processus. Ce n'est pas un instantané figé.",
+    "es-ES": "Las regiones de memoria se leen en secuencia mientras el proceso se ejecuta. No es una instantánea congelada.",
+    "pt-BR": "As regiões de memória são lidas em sequência enquanto o processo é executado. Não é um instantâneo congelado."
+  },
+  "diagnostics.modules_tab": {
+    "zh-CN": "模块",
+    "en-US": "Modules",
+    "ja-JP": "モジュール",
+    "ko-KR": "모듈",
+    "de-DE": "Module",
+    "fr-FR": "Modules",
+    "es-ES": "Módulos",
+    "pt-BR": "Módulos"
+  },
+  "diagnostics.memory_tab": {
+    "zh-CN": "内存区域",
+    "en-US": "Memory regions",
+    "ja-JP": "メモリ領域",
+    "ko-KR": "메모리 영역",
+    "de-DE": "Speicherbereiche",
+    "fr-FR": "Régions mémoire",
+    "es-ES": "Regiones de memoria",
+    "pt-BR": "Regiões de memória"
+  },
+  "diagnostics.nominal_permissions": {
+    "zh-CN": "页面权限来自系统元数据，未实际读取或执行目标内存。",
+    "en-US": "Page permissions come from system metadata. Target memory is never read or executed.",
+    "ja-JP": "ページのアクセス権限はシステムのメタデータに基づきます。対象メモリの読み取りや実行は行いません。",
+    "ko-KR": "페이지 권한은 시스템 메타데이터에서 가져옵니다. 대상 메모리를 실제로 읽거나 실행하지 않습니다.",
+    "de-DE": "Seitenrechte stammen aus Systemmetadaten. Der Zielspeicher wird nicht gelesen oder ausgeführt.",
+    "fr-FR": "Les permissions des pages proviennent des métadonnées du système. La mémoire cible n'est ni lue ni exécutée.",
+    "es-ES": "Los permisos de página provienen de los metadatos del sistema. No se lee ni ejecuta la memoria de destino.",
+    "pt-BR": "As permissões de página vêm dos metadados do sistema. A memória de destino não é lida nem executada."
+  },
+  "diagnostics.no_display_data": {
+    "zh-CN": "没有可显示的数据",
+    "en-US": "No data to display",
+    "ja-JP": "表示できるデータはありません",
+    "ko-KR": "표시할 데이터 없음",
+    "de-DE": "Keine Daten anzuzeigen",
+    "fr-FR": "Aucune donnée à afficher",
+    "es-ES": "No hay datos para mostrar",
+    "pt-BR": "Nenhum dado para exibir"
+  },
+  "diagnostics.memory.permissions": {
+    "zh-CN": "读取：%{read} · 写入：%{write} · 执行：%{execute}",
+    "en-US": "Read: %{read} · Write: %{write} · Execute: %{execute}",
+    "ja-JP": "読み取り：%{read} · 書き込み：%{write} · 実行：%{execute}",
+    "ko-KR": "읽기: %{read} · 쓰기: %{write} · 실행: %{execute}",
+    "de-DE": "Lesen: %{read} · Schreiben: %{write} · Ausführen: %{execute}",
+    "fr-FR": "Lecture : %{read} · Écriture : %{write} · Exécution : %{execute}",
+    "es-ES": "Lectura: %{read} · Escritura: %{write} · Ejecución: %{execute}",
+    "pt-BR": "Leitura: %{read} · Gravação: %{write} · Execução: %{execute}"
+  },
+  "diagnostics.preview_limit": {
+    "zh-CN": "显示前 %{count} 条，共 %{total} 条；全部已读数据请导出 JSON。",
+    "en-US": "Showing %{count} of %{total} entries. Export JSON for all captured data.",
+    "ja-JP": "全 %{total} 件中 %{count} 件を表示しています。取得済みの全データは JSON にエクスポートできます。",
+    "ko-KR": "전체 %{total}개 중 %{count}개를 표시합니다. 캡처한 모든 데이터는 JSON으로 내보내세요.",
+    "de-DE": "%{count} von %{total} Einträgen werden angezeigt. Exportieren Sie JSON für alle erfassten Daten.",
+    "fr-FR": "Affichage de %{count} entrées sur %{total}. Exportez le JSON pour toutes les données capturées.",
+    "es-ES": "Se muestran %{count} de %{total} entradas. Exporte JSON para todos los datos capturados.",
+    "pt-BR": "Exibindo %{count} de %{total} entradas. Exporte o JSON para todos os dados capturados."
+  },
+  "diagnostics.raw_api_details": {
+    "zh-CN": "原始 API 详情",
+    "en-US": "Raw API details",
+    "ja-JP": "API の元の詳細",
+    "ko-KR": "원본 API 세부 정보",
+    "de-DE": "Unveränderte API-Details",
+    "fr-FR": "Détails bruts de l'API",
+    "es-ES": "Detalles originales de la API",
+    "pt-BR": "Detalhes originais da API"
+  },
+  "task.invalid_arguments": {
+    "zh-CN": "启动参数无效：%{error}",
+    "en-US": "Invalid launch arguments: %{error}",
+    "ja-JP": "起動引数が無効です：%{error}",
+    "ko-KR": "시작 인수가 잘못되었습니다: %{error}",
+    "de-DE": "Ungültige Startargumente: %{error}",
+    "fr-FR": "Arguments de lancement invalides : %{error}",
+    "es-ES": "Argumentos de inicio no válidos: %{error}",
+    "pt-BR": "Argumentos de inicialização inválidos: %{error}"
+  },
+  "process.liveness_check_failed": {
+    "zh-CN": "无法核验进程运行状态",
+    "en-US": "Could not verify whether the process is running",
+    "ja-JP": "プロセスの実行状態を確認できませんでした",
+    "ko-KR": "프로세스 실행 상태를 확인할 수 없습니다",
+    "de-DE": "Der Prozessstatus konnte nicht überprüft werden",
+    "fr-FR": "Impossible de vérifier si le processus est en cours d'exécution",
+    "es-ES": "No se pudo verificar si el proceso está en ejecución",
+    "pt-BR": "Não foi possível verificar se o processo está em execução"
+  },
+  "overview.sample_delayed": {
+    "zh-CN": "采样已延迟：当前数值可能已经过期",
+    "en-US": "Sampling is delayed. Current values may be out of date.",
+    "ja-JP": "サンプリングが遅れています。現在の値が古い可能性があります。",
+    "ko-KR": "샘플링이 지연되었습니다. 현재 값이 오래되었을 수 있습니다.",
+    "de-DE": "Die Abfrage ist verzögert. Aktuelle Werte können veraltet sein.",
+    "fr-FR": "L'échantillonnage est retardé. Les valeurs affichées peuvent être périmées.",
+    "es-ES": "El muestreo está retrasado. Los valores actuales pueden estar desactualizados.",
+    "pt-BR": "A amostragem está atrasada. Os valores atuais podem estar desatualizados."
+  },
+  "overview.sample_time_unknown": {
+    "zh-CN": "采样时间未知：当前显示的是采样快照",
+    "en-US": "Sample time is unknown. Showing a captured sample.",
+    "ja-JP": "サンプリング時刻は不明です。取得済みのサンプルを表示しています。",
+    "ko-KR": "샘플 시간을 알 수 없습니다. 캡처한 샘플을 표시합니다.",
+    "de-DE": "Die Abfragezeit ist unbekannt. Eine erfasste Abfrage wird angezeigt.",
+    "fr-FR": "L'heure de l'échantillon est inconnue. Affichage d'un échantillon capturé.",
+    "es-ES": "Se desconoce la hora de la muestra. Se muestra una muestra capturada.",
+    "pt-BR": "O horário da amostra é desconhecido. Exibindo uma amostra capturada."
+  },
+  "help.launch_flags": {
+    "zh-CN": "启动参数：%{flags}",
+    "en-US": "Launch arguments: %{flags}",
+    "ja-JP": "起動引数：%{flags}",
+    "ko-KR": "시작 인수: %{flags}",
+    "de-DE": "Startargumente: %{flags}",
+    "fr-FR": "Arguments de lancement : %{flags}",
+    "es-ES": "Argumentos de inicio: %{flags}",
+    "pt-BR": "Argumentos de inicialização: %{flags}"
+  },
+  "search.saved": {
+    "zh-CN": "查询已保存",
+    "en-US": "Query saved",
+    "ja-JP": "検索を保存しました",
+    "ko-KR": "쿼리 저장됨",
+    "de-DE": "Abfrage gespeichert",
+    "fr-FR": "Requête enregistrée",
+    "es-ES": "Consulta guardada",
+    "pt-BR": "Consulta salva"
+  },
+  "search.enter_query": {
+    "zh-CN": "请输入查询后再保存",
+    "en-US": "Enter a query before saving",
+    "ja-JP": "検索を入力してから保存してください",
+    "ko-KR": "쿼리를 입력한 후 저장하세요",
+    "de-DE": "Vor dem Speichern eine Abfrage eingeben",
+    "fr-FR": "Saisissez une requête avant de l'enregistrer",
+    "es-ES": "Introduzca una consulta antes de guardarla",
+    "pt-BR": "Digite uma consulta antes de salvar"
+  },
+  "search.no_control_characters": {
+    "zh-CN": "查询不能包含换行或控制字符",
+    "en-US": "Queries cannot contain line breaks or control characters",
+    "ja-JP": "検索には改行や制御文字を含められません",
+    "ko-KR": "쿼리에 줄바꿈이나 제어 문자를 포함할 수 없습니다",
+    "de-DE": "Abfragen dürfen keine Zeilenumbrüche oder Steuerzeichen enthalten",
+    "fr-FR": "Les requêtes ne peuvent pas contenir de sauts de ligne ou de caractères de contrôle",
+    "es-ES": "Las consultas no pueden contener saltos de línea ni caracteres de control",
+    "pt-BR": "As consultas não podem conter quebras de linha ou caracteres de controle"
+  },
+  "search.max_length": {
+    "zh-CN": "查询最多支持 256 个字符",
+    "en-US": "Queries support up to 256 characters",
+    "ja-JP": "検索は最大 256 文字です",
+    "ko-KR": "쿼리는 최대 256자까지 지원합니다",
+    "de-DE": "Abfragen unterstützen bis zu 256 Zeichen",
+    "fr-FR": "Les requêtes peuvent contenir jusqu'à 256 caractères",
+    "es-ES": "Las consultas admiten hasta 256 caracteres",
+    "pt-BR": "As consultas aceitam até 256 caracteres"
+  },
+  "overview.updated_seconds_ago": {
+    "zh-CN": "数据更新于 %{seconds} 秒前",
+    "en-US": "Updated %{seconds} seconds ago",
+    "ja-JP": "%{seconds} 秒前に更新",
+    "ko-KR": "%{seconds}초 전에 업데이트됨",
+    "de-DE": "Vor %{seconds} Sekunden aktualisiert",
+    "fr-FR": "Mis à jour il y a %{seconds} secondes",
+    "es-ES": "Actualizado hace %{seconds} segundos",
+    "pt-BR": "Atualizado há %{seconds} segundos"
+  },
+  "overview.disk_scope": {
+    "zh-CN": "已测卷的最高活动率",
+    "en-US": "Highest activity among measured volumes",
+    "ja-JP": "測定したボリュームの最大アクティブ率",
+    "ko-KR": "측정된 볼륨 중 가장 높은 활동률",
+    "de-DE": "Höchste Aktivität der gemessenen Volumes",
+    "fr-FR": "Activité la plus élevée parmi les volumes mesurés",
+    "es-ES": "Mayor actividad entre los volúmenes medidos",
+    "pt-BR": "Maior atividade entre os volumes medidos"
+  },
+  "overview.gpu_scope": {
+    "zh-CN": "已测 GPU 的最忙引擎",
+    "en-US": "Busiest engine among measured GPUs",
+    "ja-JP": "測定した GPU の最も使用率が高いエンジン",
+    "ko-KR": "측정된 GPU 중 가장 사용량이 높은 엔진",
+    "de-DE": "Am stärksten genutzte Engine der gemessenen GPUs",
+    "fr-FR": "Moteur le plus sollicité parmi les GPU mesurés",
+    "es-ES": "Motor más ocupado entre las GPU medidas",
+    "pt-BR": "Mecanismo mais ocupado entre as GPUs medidas"
+  },
+  "overview.no_process_records": {
+    "zh-CN": "暂无可展示的进程记录",
+    "en-US": "No process records to display yet",
+    "ja-JP": "表示できるプロセス記録はまだありません",
+    "ko-KR": "아직 표시할 프로세스 기록이 없습니다",
+    "de-DE": "Noch keine Prozessdaten anzuzeigen",
+    "fr-FR": "Aucun enregistrement de processus à afficher pour le moment",
+    "es-ES": "Aún no hay registros de procesos para mostrar",
+    "pt-BR": "Ainda não há registros de processos para exibir"
   }
 }

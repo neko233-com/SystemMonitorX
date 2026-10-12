@@ -23,6 +23,11 @@ impl SystemMonitorApp {
     ) {
         let target = request.target;
         match request.action {
+            ProcessRowAction::OpenTools => {
+                if let Some(ticks) = target.creation_time_windows_ticks {
+                    self.open_process_tools(target.pid, ticks, window, cx);
+                }
+            }
             ProcessRowAction::CopyPid => {
                 self.copy_developer_text(target.pid.to_string(), " PID".to_owned().into(), cx)
             }

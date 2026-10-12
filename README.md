@@ -2,16 +2,33 @@
 
 English | [简体中文](README.zh-CN.md)
 
+**See which apps use your PC’s resources, find a process or port owner, and manage it in one native window.**
+
+[Download for Windows (MSI)](https://github.com/neko233-com/SystemMonitorX/releases/download/v0.5.0/SystemMonitorX-0.5.0-x64.msi) · [Portable ZIP](https://github.com/neko233-com/SystemMonitorX/releases/download/v0.5.0/SystemMonitorX-0.5.0-x64-portable.zip) · [简体中文](README.zh-CN.md)
+
+| What you need | Start here |
+| --- | --- |
+| Check which apps are busy | Open **Overview**, then click a top CPU or memory process |
+| Find an app or PID | Open **Processes**, type a name or `pid:1234` |
+| Find who uses a busy port | Open **Ports**, type `port:3000`, then right-click to view its process |
+| Understand an unfamiliar process | Right-click **Open file location**, or open **Process tools** for its modules |
+
+![Overview: resource usage and the main processes](https://raw.githubusercontent.com/neko233-com/SystemMonitorX/v0.5.0/assets/screenshots/overview-en.png)
+
+*Anonymous illustrative data rendered by the real native Windows window. These examples are not live telemetry or performance benchmarks.*
+
 A native Windows 10/11 system monitor and process manager built with **Rust 2024 and Longbridge GPUI Kit 0.7.3**. [Public repository](https://github.com/neko233-com/SystemMonitorX).
 
-**v0.4.0 adds eight UI languages**, automatic Windows UI-language selection, and saved language switching in Settings. It builds on stable name sorting, real executable icons, developer process/port workflows, application grouping, native CPU topology, power information, offline signature inspection, and a PowerShell installer. See the [roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md) for acceptance status and remaining work.
+**v0.5.0 adds a simple Overview, five-column process view, saved searches, quick actions, and on-demand developer diagnostics.** Start with resource usage and the main consumers; open detailed tools only when needed. Eight UI languages, stable name sorting, real process icons/PID, CPU/GPU/hardware information and verified update downloads remain available. See the [roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md) for acceptance status and remaining work.
 
 ## Download and install
 
-Choose a published version from [Releases](https://github.com/neko233-com/SystemMonitorX/releases). The v0.4.0 package names are:
+Just want to use it? **Download the MSI → open it → launch SystemMonitorX from Start.** Begin with Overview. Check and install updates in **Settings**. For a portable copy, extract the entire ZIP and open `SystemMonitorX.exe`.
 
-- **SystemMonitorX-0.4.0-x64.msi**: per-user installation, upgrade and uninstall, with a Start menu shortcut.
-- **SystemMonitorX-0.4.0-x64-portable.zip**: extract the complete archive, then run `SystemMonitorX.exe`.
+Choose a published version from [Releases](https://github.com/neko233-com/SystemMonitorX/releases). The v0.5.0 package names are:
+
+- **SystemMonitorX-0.5.0-x64.msi**: per-user installation, upgrade and uninstall, with a Start menu shortcut.
+- **SystemMonitorX-0.5.0-x64-portable.zip**: extract the complete archive, then run `SystemMonitorX.exe`.
 - **SHA256SUMS.txt**: SHA-256 checksums for both packages.
 
 Requires Windows 10 1803 (build 17134) or later / Windows 11, x64, and a GPU/driver supported by GPUI's Direct3D renderer. Default directory: `%LOCALAPPDATA%\Programs\SystemMonitorX`. Keep `SystemMonitorXUpdate.exe` and all bundled VC runtime DLLs beside the main executable.
@@ -26,8 +43,34 @@ The command selects the latest **published stable release**. A specified version
 
 The application runs with normal user permissions. Elevation is explicit and Windows handles consent. It does not modify the built-in Task Manager registration or system shortcuts. Packages are currently unsigned.
 
-<!-- V0.4_SOURCE_NATIVE_FREEZE: freeze verified source/native results before packaging; maintain actual package/install acceptance in the online roadmap. -->
-**v0.4.0 verification:** 187 source tests passed (131 library + 56 GUI source tests); 2 environment-dependent tests are ignored by default. Native Windows/D3D11 QA passed **34/34 checks**, with **8 Settings language switches and 40 screenshots at 1040×640 logical pixels, 1.5× scale**. Actual v0.4.0 package and installation acceptance is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md). Historical public v0.3.0 passed PS5.1 installation, installed-file/shortcut checks and portable launch from a Unicode path; those results do not establish v0.4.0 installation.
+**v0.5.0 source/native validation:** 238 source tests passed (178 library + 60 GUI); 2 environment-dependent tests remain ignored. All 54 real Windows/D3D11 interaction checks passed at 1040×640 logical pixels and 1.5× scale, including eight Settings language switches and the new investigation tools. Ten self-process module/memory checks and 29 installer self-tests passed. Public package and installation acceptance is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md).
+
+## Start here
+
+1. Open **Overview** to see CPU, memory, GPU and disk usage with their main observed consumers. These are snapshot summaries, not a diagnosis of computer health.
+2. Open **Processes** to find an application by name. A fresh setup shows **Name, PID, CPU, Memory and GPU**; use **Columns → Common columns / All columns** for the level of detail you need. Existing saved column choices are preserved.
+3. Press **F1** for in-app help or **Ctrl+Shift+P** to find a page or action. Use **F5** to refresh the current page. A missing measurement appears as **—**, rather than a guessed value.
+
+## Screenshots
+
+**Processes:** the default view shows Name, PID, CPU, Memory and GPU. Names stay in A–Z order while measurements refresh.
+
+![Processes: icons, PID and five common columns](https://raw.githubusercontent.com/neko233-com/SystemMonitorX/v0.5.0/assets/screenshots/processes-en.png)
+
+<details>
+<summary>Investigating a port or a process? Open these two examples</summary>
+
+**Ports:** type `port:3000` to find an owner, or `pid:1234` for a process’s endpoints. Right-click to view the process or request confirmed termination.
+
+![Ports: TCP/UDP endpoints and their process owners](https://raw.githubusercontent.com/neko233-com/SystemMonitorX/v0.5.0/assets/screenshots/ports-en.png)
+
+**Process tools:** right-click a process to inspect loaded modules and virtual-memory metadata, copy a query, or save diagnostic JSON. Copying a query does not run it.
+
+![Process tools: on-demand inspection and diagnostic export](https://raw.githubusercontent.com/neko233-com/SystemMonitorX/v0.5.0/assets/screenshots/process-tools-en.png)
+
+These are anonymous illustrative samples. See the [developer guide](https://github.com/neko233-com/SystemMonitorX/blob/main/docs/developer-tools.md) for details.
+
+</details>
 
 ## Languages and international use
 
@@ -58,9 +101,13 @@ Lists default to the same Unicode lowercase name ordering, with PID and birth id
 | Find a port owner | `port:8080`, `pid:1234`, `tcp listen`, `udp v6`; combine terms with spaces |
 | Process context menu | Query ports, copy PID/path/command line, open file location, confirm process/tree/application termination |
 | Port context menu | Copy PID/endpoints/path, jump to the captured process identity, confirm termination |
+| Saved searches | Save/reuse/delete up to eight process and port queries in total; each is shown on its corresponding page |
+| Process tools | Read-only DLL/module and virtual-address diagnostics, identity-checked PowerShell queries, explicit terminal launch, copy/save diagnostic JSON |
 | Export | Ctrl+E exports search-matching processes on Processes/Details, filtered endpoints on Ports, and the complete process snapshot on other pages; headers stay English |
 
 Process/Details export includes all raw processes matching the search, including members hidden by a collapsed group or tree. Process CSV includes the captured raw identity and available CPU, memory, GPU, I/O, network, thread/handle and account fields. Missing optional fields stay empty. Port CSV includes protocol, address family, endpoints, state, PID, executable path, creation FILETIME, query and identity notes. CSV quoting and formula-injection protection retain literal source data.
+
+Diagnostic JSON captures only the selected process and matching PID/creation FILETIME endpoints. It has fixed English keys, a schema version, collection timestamps/sources and null unavailable fields. Command lines and environment variables are excluded by default; paths, account names and network addresses can still identify local data. Windows creation ticks are decimal strings to preserve exact identity in JSON consumers. Copying a PowerShell query does not run it. **Open PowerShell in program folder** opens a terminal only after that action is clicked, in the executable folder rather than an assumed remote working directory. See the bilingual [developer guide](https://github.com/neko233-com/SystemMonitorX/blob/main/docs/developer-tools.md) for diagnostics and launch arguments.
 
 Icons load for visible rows on one background worker with bounded queues and a TTL cache. Ports refresh every two seconds while that page is open. Hidden pages defer display-model work. There is no WebView or browser runtime.
 
@@ -68,8 +115,9 @@ Icons load for visible rows on one background worker with bounded queues and a T
 
 | Page | Capabilities |
 | --- | --- |
+| Overview | Snapshot CPU/memory/GPU/disk summaries, main observed resource consumers, capacity hints and links to detailed pages |
 | Processes / Details | Virtual tables, PID, CPU, working set, GPU, VRAM, I/O and process network; stable sorting, application groups, process trees, optional columns; priority, current-group affinity, efficiency mode and termination |
-| Selected process | Asynchronous command line, architecture/WOW64 and executable version resources; on-demand offline embedded/catalog Authenticode verification |
+| Selected process | Asynchronous command line, architecture/WOW64 and executable version resources; offline embedded/catalog Authenticode inspection; on-demand read-only DLL and virtual-address diagnostics with JSON export |
 | Performance | CPU, memory, multiple GPUs, disks and network; 120-sample history, logical CPU loads, process/thread/handle counts, commit/cache/kernel memory |
 | Devices | CPU groups/core/NUMA/cache/efficiency classes, power/battery, motherboard/BIOS, DIMMs, storage, NICs and GPU driver/PCI identity |
 | DirectX 12 | Per-adapter feature level, shader model, ray tracing, mesh shader, sampler feedback, enhanced barriers and node count |
@@ -77,7 +125,7 @@ Icons load for visible rows on one background worker with bounded queues and a T
 | Startup | HKCU native-view Run, HKLM 32-/64-bit Run, user/common Startup folders, StartupApproved state and enable/disable with the original command retained |
 | Users | WTS sessions and resource aggregation; confirmed disconnect/logoff |
 | History | Observed CPU/I/O and available ETW bytes, ended-process retention, application aggregation and bounded persistence |
-| Settings | Eight languages/System preference, 0.5 / 1 / 2 second sampling, theme, always-on-top, columns, elevation, automatic/manual update checks and one-click installation |
+| Settings | Eight languages/System preference, 0.5 / 1 / 2 / 5 second sampling, theme, always-on-top, columns, elevation, automatic/manual update checks and one-click installation |
 
 Management verifies PID and original creation FILETIME, then acts on the same native handle. Critical processes and this application are protected. Application termination validates every captured member before acting. SCM state and startup selection use raw enums/identities rather than translated text, so switching languages does not change the management target. Expensive collection, hardware, file and management operations run in the background with immutable snapshots.
 
@@ -91,6 +139,7 @@ Management verifies PID and original creation FILETIME, then acts on the same na
 - **Process network:** Kernel-Network ETW/TDH event bytes associated with exact process birth. Administrator/kernel tracing permission is usually required. Permission, dropped-event and schema failures display unavailable status. Owned-loopback aggregate bytes and trace cleanup have historical verification; correct owned bytes per protocol, long-running external traffic and broader schemas still need regression.
 - **History:** starts from observation baselines. Processes entirely between samples and time when this application was not running cannot be reconstructed. Actual network bytes are accumulated only across valid ETW periods; coverage gaps are retained and storage is bounded.
 - **Hardware/signatures:** cached WMI/Win32 data with manual refresh. Offline WinVerifyTrust uses local embedded/catalog evidence without online revocation. Version-resource CompanyName is separate from the verified signer; absent signing timestamps stay unknown.
+- **Process diagnostics:** Toolhelp module snapshots and VirtualQueryEx region metadata are collected only on demand, on a worker, with exact identity checks. Default limits are 4,096 modules, 16,384 regions and a two-second cooperative budget checked between Windows calls; a single native call can exceed the budget. No target memory contents are read and the process is not suspended or modified. Virtual address size/reservation/commit metadata is not resident RAM or a memory-leak diagnosis. Partial/unavailable results retain their reason; access permissions, bitness and changing module lists can limit coverage.
 - **Management:** affinity is limited to the current processor group. Additional scheduled-task, packaged-application and other logon-startup sources, measured startup impact, and per-user process expansion remain incomplete.
 - **DirectX:** the UI renders with **D3D11**; querying D3D12 capabilities does not switch its renderer. Stable remote-process current-directory inspection is not implemented.
 
@@ -110,6 +159,10 @@ Version 0.2.1 fixed older extended-path MSI handoff failures. Existing 0.2.0 use
 
 | Shortcut | Action |
 | --- | --- |
+| Ctrl+Shift+P | Find a page or action |
+| F1 | Open in-app help |
+| F5 | Refresh the current page; telemetry views use the latest collected snapshot |
+| Ctrl+1 / Ctrl+2 / Ctrl+3 | Overview / Processes / Ports |
 | Ctrl+F | Search the current searchable page |
 | Ctrl+N | Run a new task |
 | Ctrl+E | Export according to the current page's scope |
@@ -136,7 +189,7 @@ Optional real Windows GPUI/D3D11 UI regression:
 cargo run --release --features ui-test --bin SystemMonitorX -- --ui-smoke-dir C:/Temp/SystemMonitorX-ui-check
 ~~~
 
-Current v0.4.0 source tests: **187 passed, 2 ignored**. The PowerShell installer has 29 offline self-tests previously run under PS5.1 and PS7. Native Windows/D3D11 QA passed **34/34 checks**, with **8 Settings language switches and 40 screenshots at 1040×640 logical pixels, 1.5× scale**. Manual review covered Processes and Settings in all eight languages (**16/40 screenshots**); the remaining 24 were covered by automated native checks. Actual package/install acceptance for this version is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md). Reports/screenshots can contain local process/device information and should stay private.
+**Historical v0.4.0 verification:** source tests: **187 passed, 2 ignored**. The PowerShell installer has 29 offline self-tests previously run under PS5.1 and PS7. Native Windows/D3D11 QA passed **34/34 checks**, with **8 Settings language switches and 40 screenshots at 1040×640 logical pixels, 1.5× scale**. Manual review covered Processes and Settings in all eight languages (**16/40 screenshots**); the remaining 24 were covered by automated native checks. Actual package/install acceptance for that version is maintained in the [online roadmap](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md). Reports/screenshots can contain local process/device information and should stay private.
 
 The final v0.4.0 native run observed **806 real processes**. Across **230 individual keystrokes**, keyboard dispatch/filter CPU time was p50 **3.6232 ms**, p95 **5.6238 ms**, and max **9.5156 ms**. Across **30 renders**, `render_frame` CPU time was p95 **6.2899 ms** and max **6.7198 ms**. These timings include test-observation overhead, exclude PNG encoding and GPU presentation, and are not an official Task Manager comparison. A separate synthetic 10,000-row model is never injected into live telemetry. Detailed native scope and historical results are recorded in [ROADMAP.md](https://github.com/neko233-com/SystemMonitorX/blob/main/ROADMAP.md).
 

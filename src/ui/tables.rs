@@ -57,6 +57,7 @@ pub fn duration(secs: u64) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessRowAction {
     QueryPorts,
+    OpenTools,
     CopyPid,
     CopyPath,
     CopyCommandLine,
@@ -69,6 +70,7 @@ impl ProcessRowAction {
     fn menu_id(self) -> &'static str {
         match self {
             Self::QueryPorts => "process-query-ports",
+            Self::OpenTools => "process-open-tools",
             Self::CopyPid => "process-copy-pid",
             Self::CopyPath => "process-copy-path",
             Self::CopyCommandLine => "process-copy-command-line",
@@ -882,6 +884,7 @@ impl TableDelegate for ProcessTable {
         let target = Rc::new(target);
         let items = [
             (ProcessRowAction::QueryPorts, "查询该 PID 的端口", true),
+            (ProcessRowAction::OpenTools, "进程工具", verified),
             (ProcessRowAction::CopyPid, "复制 PID", true),
             (ProcessRowAction::CopyPath, "复制路径", has_path),
             (ProcessRowAction::CopyCommandLine, "复制命令行", verified),
@@ -914,14 +917,15 @@ impl TableDelegate for ProcessTable {
                 })
                 .disabled(!enabled)
                 .on_click(move |_, window, cx| {
-                    handler(
-                        ProcessActionRequest {
-                            action,
-                            target: (*target).clone(),
-                        },
-                        window,
-                        cx,
-                    );
+                    // The menu restores its own focus after this callback.
+                    // Open dialogs on the next turn so they remember the table's
+                    // live focus, rather than a menu that is about to disappear.
+                    let request = ProcessActionRequest {
+                        action,
+                        target: (*target).clone(),
+                    };
+                    let handler = handler.clone();
+                    window.defer(cx, move |window, cx| handler(request, window, cx));
                 }),
             );
         }

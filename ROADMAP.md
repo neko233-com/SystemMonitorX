@@ -4,7 +4,37 @@ English | [简体中文](ROADMAP.zh-CN.md)
 
 The goal is to cover practical Windows Task Manager workflows, add verifiable device information, and improve responsiveness and updates. Implemented features, partial verification, and complete acceptance are recorded separately. Adding features does not establish complete Task Manager replacement or support for every device.
 
-v0.4.0 uses **Rust 2024 / GPUI Kit 0.7.3** and implements eight UI locales: **zh-CN, en-US, ja-JP, ko-KR, de-DE, fr-FR, es-ES and pt-BR**. Windows UI-language preferences resolve automatically with English fallback; Settings changes apply immediately and persist. Raw process/device names, paths, PID/creation identity and external diagnostics remain source data. Cached feedback and hardware presentation are translated again without another hardware query. Current source verification is **187 tests passed (131 library + 56 GUI source tests), 2 environment-dependent tests ignored**. The installation script retains 29 separate offline self-tests previously run under PS5.1 and PS7.
+## v0.5.0 usability work
+
+This version keeps everyday information visible and puts investigation tools behind a selected process, a right-click menu or a dialog. It continues to use Rust 2024 and GPUI Kit 0.7.3 with eight UI locales.
+
+| Workflow | Implemented in v0.5.0 |
+| --- | --- |
+| Start and understand usage | Overview with observed CPU/memory/disk/GPU load, top CPU/memory owners, low-space hints, monotonic sample age and paused/delayed/unknown states; resource load is not a health diagnosis |
+| Keep the interface simple | Five common process columns by default on a fresh setup; common/all column presets, saved custom choices, in-app help and searchable quick actions |
+| Find and repeat investigations | Up to eight process/port searches in total, long Unicode queries retained, stable A–Z names, Ctrl+1/2/3 navigation and GUI PID/port/page launch arguments |
+| Control refresh | 0.5/1/2/5 second sampling; F5 requests fresh sampling/on-demand page data; pause freezes display while collection continues |
+| Inspect a selected process | Background read-only loaded-module and virtual-memory metadata queries with exact PID/FILETIME checks; complete/partial/unavailable status, typed localized reasons and bounded lists |
+| Export evidence | Selected immutable process/endpoint/inspection JSON with fixed English schema, decimal-string creation ticks and command lines/environment omitted by default |
+| Use familiar developer tools | Identity-checked PowerShell process/TCP/UDP queries copied without execution; explicit PowerShell launch in the program folder |
+| Avoid stale process actions | Held-handle, nonblocking Windows process-object liveness checks in details and management, independently of undefined live-process exit FILETIME |
+
+Native inspections are sequential observations, not an atomic debugger snapshot. Virtual address-space metadata does not measure resident RAM or prove a leak. Modules/regions are bounded to 4,096/16,384 with a default two-second cooperative budget; the UI shows at most 256 entries per list and JSON retains all entries actually read. GPU/disk summaries use available measured sources. See the [developer guide](docs/developer-tools.md).
+
+<!-- V0.5_RELEASE_ACCEPTANCE: source/native verified; public package/install results are added after actual acceptance. -->
+
+| v0.5.0 acceptance | Verified result |
+| --- | --- |
+| Source / translations | 238 tests passed (178 library + 60 GUI), 2 ignored; strict Clippy/format; 628 owned UI source texts with no catalog/coverage findings; 641 app keys across eight languages; 15 checker self-tests |
+| Native interaction | 54/54 real Windows/D3D11 checks (34 baseline + 20 usability); eight native Settings language switches, 64 private locale screenshots at 1040×640 logical pixels / 1.5× scale; new module/region screenshots in all eight locales visually reviewed |
+| Read-only diagnostics | 10/10 own-process native checks, including complete modules/regions, exact-identity rejection and partial limits; GUI inspected 120 modules / 2,208 regions within limits |
+| Installer / docs | 29 offline installer self-tests on PS5.1 and PS7; eight anonymous English/Chinese public documentation images visually reviewed separately; PNG text/EXIF metadata absent |
+| MSI / ZIP | Passed local final packaging: exact 16-file MSI/ZIP payload, versions, CRT, per-user destination, HKCU64 install path, shortcuts and extracted-file hashes; MSI 8,404,992 bytes / ZIP 11,256,861 bytes |
+| Public release / installation | Pending actual published-asset and public installation acceptance |
+
+These are distinct scopes: synthetic documentation samples do not establish live telemetry or performance. Hardware/permissions/accessibility/regional-formatting and the complete automatic-newer-release update regression remain the limitations described below. Historical results below apply to their stated versions.
+
+v0.4.0 uses **Rust 2024 / GPUI Kit 0.7.3** and implements eight UI locales: **zh-CN, en-US, ja-JP, ko-KR, de-DE, fr-FR, es-ES and pt-BR**. Windows UI-language preferences resolve automatically with English fallback; Settings changes apply immediately and persist. Raw process/device names, paths, PID/creation identity and external diagnostics remain source data. Cached feedback and hardware presentation are translated again without another hardware query. Historical v0.4.0 source verification is **187 tests passed (131 library + 56 GUI source tests), 2 environment-dependent tests ignored**. The installation script retains 29 separate offline self-tests previously run under PS5.1 and PS7.
 
 <!-- V0.4_RELEASE_ACCEPTANCE: actual v0.4.0 source/native/public-artifact/install scope verified; keep local evidence private. -->
 

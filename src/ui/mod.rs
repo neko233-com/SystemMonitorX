@@ -2,6 +2,7 @@ mod columns;
 mod developer_actions;
 mod directx;
 mod hardware;
+mod inspection;
 mod localization;
 mod management;
 mod ports;
@@ -10,12 +11,17 @@ mod process_icons;
 #[cfg(feature = "ui-test")]
 mod qa;
 #[cfg(feature = "ui-test")]
+mod qa_docs;
+#[cfg(feature = "ui-test")]
 mod qa_locales;
 #[cfg(feature = "ui-test")]
 mod qa_performance;
 #[cfg(feature = "ui-test")]
 mod qa_update;
+#[cfg(feature = "ui-test")]
+mod qa_usability;
 mod tables;
+mod usability;
 
 use gpui_kit::assets::IconName as UiIcon;
 use gpui_kit::base::TestSupportExt as _;
@@ -38,7 +44,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use system_monitor_x::i18n::Language;
 use system_monitor_x::{
@@ -52,11 +58,23 @@ use tables::{ProcessTable, TextTable, bytes, duration, percent, rate};
 
 gpui_kit::actions!(
     system_monitor_x,
-    [FocusSearch, TogglePause, NewTask, ExportCsv]
+    [
+        FocusSearch,
+        TogglePause,
+        NewTask,
+        ExportCsv,
+        QuickActions,
+        ShowHelp,
+        RefreshPage,
+        GoOverview,
+        GoProcesses,
+        GoPorts
+    ]
 );
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
+    Overview,
     Processes,
     Details,
     Ports,
@@ -71,6 +89,7 @@ enum Page {
 impl Page {
     fn source_title(self) -> &'static str {
         match self {
+            Self::Overview => "概览",
             Self::Processes => "进程",
             Self::Details => "详细信息",
             Self::Ports => "端口与连接",
@@ -98,6 +117,7 @@ impl Page {
     }
     fn id(self) -> &'static str {
         match self {
+            Self::Overview => "nav-overview",
             Self::Processes => "nav-processes",
             Self::Details => "nav-details",
             Self::Ports => "nav-ports",
@@ -112,6 +132,7 @@ impl Page {
     }
     fn icon(self) -> UiIcon {
         match self {
+            Self::Overview => UiIcon::Activity,
             Self::Processes => UiIcon::Layers,
             Self::Details => UiIcon::Layers,
             Self::Ports => UiIcon::Network,
@@ -136,6 +157,9 @@ struct Settings {
     hidden_process_columns: Vec<usize>,
     group_processes: bool,
     language: Language,
+    start_on_overview: bool,
+    #[serde(deserialize_with = "usability::deserialize_saved_searches")]
+    saved_searches: Vec<system_monitor_x::developer_tools::SavedSearch>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -144,9 +168,11 @@ impl Default for Settings {
             dark: true,
             auto_updates: true,
             always_on_top: false,
-            hidden_process_columns: Vec::new(),
+            hidden_process_columns: (5..18).collect(),
             group_processes: true,
             language: Language::System,
+            start_on_overview: true,
+            saved_searches: Vec::new(),
         }
     }
 }
@@ -154,7 +180,7 @@ impl Settings {
     fn path() -> PathBuf {
         #[cfg(feature = "ui-test")]
         if let Some(directory) = std::env::args()
-            .skip_while(|arg| arg != "--ui-smoke-dir")
+            .skip_while(|arg| !matches!(arg.as_str(), "--ui-smoke-dir" | "--docs-screenshots-dir"))
             .nth(1)
         {
             return PathBuf::from(directory).join("settings.json");
@@ -167,11 +193,13 @@ impl Settings {
             .ok()
             .and_then(|v| serde_json::from_slice(&v).ok())
             .unwrap_or_default();
-        if ![500, 1000, 2000].contains(&s.interval_ms) {
+        if ![500, 1000, 2000, 5000].contains(&s.interval_ms) {
             s.interval_ms = 1000
         }
         s.hidden_process_columns
             .retain(|column| *column > 0 && *column < 18);
+        s.saved_searches =
+            system_monitor_x::developer_tools::normalize_saved_searches(s.saved_searches);
         s.hidden_process_columns.sort_unstable();
         s.hidden_process_columns.dedup();
         s
@@ -198,7 +226,7 @@ struct HistoryPoint {
 enum CollectorCommand {
     ResetHistory(std::sync::mpsc::Sender<std::result::Result<(), String>>),
 }
-type SnapshotSlot = Arc<Mutex<Option<(u64, Arc<SystemSnapshot>)>>>;
+type SnapshotSlot = Arc<Mutex<Option<(u64, Arc<SystemSnapshot>, Instant)>>>;
 
 pub struct SystemMonitorApp {
     page: Page,
@@ -206,16 +234,27 @@ pub struct SystemMonitorApp {
     slot: SnapshotSlot,
     collector_commands: std::sync::mpsc::SyncSender<CollectorCommand>,
     last_seq: u64,
+    snapshot_sampled_instant: Option<Instant>,
     process_display_seq: Option<u64>,
     users_display_seq: Option<u64>,
     history_display_seq: Option<u64>,
     stopped: Arc<AtomicBool>,
     interval: Arc<AtomicU64>,
+    sampler_refresh: Arc<AtomicBool>,
     paused: bool,
     settings: Settings,
     resolved_language: Language,
     search: Entity<InputState>,
     task_input: Entity<InputState>,
+    quick_search: Entity<InputState>,
+    overview: Option<Arc<system_monitor_x::insights::ResourceOverview>>,
+    overview_seq: Option<u64>,
+    inspection: Option<Arc<system_monitor_x::process_diagnostics::ProcessDiagnostics>>,
+    inspection_identity: Option<(u32, u64)>,
+    inspection_loading: bool,
+    inspection_show_memory: bool,
+    inspection_generation: u64,
+    inspection_error: Option<UiMessage>,
     processes: Entity<TableState<ProcessTable>>,
     services: Entity<TableState<TextTable>>,
     startup: Entity<TableState<TextTable>>,
@@ -286,6 +325,8 @@ impl SystemMonitorApp {
         let slot: SnapshotSlot = Arc::new(Mutex::new(None));
         let stopped = Arc::new(AtomicBool::new(false));
         let interval = Arc::new(AtomicU64::new(settings.interval_ms));
+        let sampler_refresh = Arc::new(AtomicBool::new(false));
+        let worker_refresh = sampler_refresh.clone();
         let (worker_slot, worker_stop, worker_interval) =
             (slot.clone(), stopped.clone(), interval.clone());
         std::thread::Builder::new()
@@ -305,11 +346,12 @@ impl SystemMonitorApp {
                     let sample = Arc::new(monitor.sample());
                     seq += 1;
                     if let Ok(mut slot) = worker_slot.lock() {
-                        *slot = Some((seq, sample));
+                        *slot = Some((seq, sample, Instant::now()));
                     }
                     let mut elapsed = 0;
                     while elapsed < worker_interval.load(Ordering::Relaxed)
                         && !worker_stop.load(Ordering::Relaxed)
+                        && !worker_refresh.swap(false, Ordering::AcqRel)
                     {
                         std::thread::sleep(Duration::from_millis(100));
                         elapsed += 100;
@@ -322,6 +364,8 @@ impl SystemMonitorApp {
         let task_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr("例如 notepad.exe 或可执行文件路径"))
         });
+        let quick_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr("搜索页面或操作")));
         let process_action_parent = cx.entity().downgrade();
         let processes = cx.new(|cx| {
             let mut delegate = ProcessTable::new();
@@ -417,6 +461,16 @@ impl SystemMonitorApp {
                 .col_movable(false)
         });
         let subscriptions = vec![
+            cx.subscribe_in(
+                &quick_search,
+                window,
+                |_, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        window.refresh();
+                        cx.notify();
+                    }
+                },
+            ),
             cx.subscribe(&ports, |_, table, event: &TableEvent, cx| match event {
                 TableEvent::SelectRow(row) | TableEvent::DoubleClickedRow(row) => {
                     if table.read(cx).selected_row() == Some(*row) {
@@ -545,21 +599,36 @@ impl SystemMonitorApp {
             })
             .expect("start settings writer");
         let mut app = Self {
-            page: Page::Processes,
+            page: if settings.start_on_overview {
+                Page::Overview
+            } else {
+                Page::Processes
+            },
             snapshot: None,
             slot,
             collector_commands,
             last_seq: 0,
+            snapshot_sampled_instant: None,
             process_display_seq: None,
             users_display_seq: None,
             history_display_seq: None,
             stopped,
             interval,
+            sampler_refresh,
             paused: false,
             settings,
             resolved_language,
             search,
             task_input,
+            quick_search,
+            overview: None,
+            overview_seq: None,
+            inspection: None,
+            inspection_identity: None,
+            inspection_loading: false,
+            inspection_show_memory: false,
+            inspection_generation: 0,
+            inspection_error: None,
             processes,
             services,
             startup,
@@ -626,6 +695,60 @@ impl SystemMonitorApp {
         }
         app
     }
+    fn refresh_overview_age(&mut self, cx: &mut Context<Self>) {
+        if self.page != Page::Overview {
+            return;
+        }
+        let age = system_monitor_x::insights::SnapshotObservedAge {
+            // Monotonic producer receipt time remains attached to this displayed snapshot.
+            // Pause does not replace it with the background collector's newer sample.
+            age_millis: self
+                .snapshot_sampled_instant
+                .map(|instant| instant.elapsed().as_secs().saturating_mul(1000)),
+            paused: self.paused,
+        };
+        if let Some(overview) = &mut self.overview
+            && overview.observed_age != age
+        {
+            Arc::make_mut(overview).set_observed_age(age);
+            cx.notify();
+        }
+    }
+    fn apply_launch_request(
+        &mut self,
+        request: system_monitor_x::launch::LaunchRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use system_monitor_x::launch::{LaunchPage, LaunchView};
+        if let Some(view) = request.view {
+            self.set_simple_columns(view == LaunchView::Simple, cx);
+        }
+        if let Some(page) = request.page {
+            let page = match page {
+                LaunchPage::Overview => Page::Overview,
+                LaunchPage::Processes => Page::Processes,
+                LaunchPage::Details => Page::Details,
+                LaunchPage::Performance => Page::Performance,
+                LaunchPage::Ports => Page::Ports,
+                LaunchPage::Services => Page::Services,
+                LaunchPage::Startup => Page::Startup,
+                LaunchPage::Users => Page::Users,
+                LaunchPage::History => Page::History,
+                LaunchPage::Devices => Page::Devices,
+                LaunchPage::Settings => Page::Settings,
+            };
+            self.set_page(page, window, cx);
+        }
+        if let Some(query) = request.query {
+            self.search
+                .update(cx, |input, cx| input.set_value(query, window, cx));
+            self.filter(cx);
+        }
+        if request.show_help {
+            self.show_help(&ShowHelp, window, cx);
+        }
+    }
     fn poll(&mut self, cx: &mut Context<Self>) {
         if let Some(error) = self
             .settings_error
@@ -662,6 +785,7 @@ impl SystemMonitorApp {
         {
             cx.notify();
         }
+        self.refresh_overview_age(cx);
         if self.paused {
             return;
         }
@@ -674,13 +798,14 @@ impl SystemMonitorApp {
             self.refresh_ports(cx);
         }
         let next = self.slot.lock().ok().and_then(|s| s.clone());
-        let Some((seq, snapshot)) = next else {
+        let Some((seq, snapshot, sampled_instant)) = next else {
             return;
         };
         if seq == self.last_seq {
             return;
         }
         self.last_seq = seq;
+        self.snapshot_sampled_instant = Some(sampled_instant);
         self.sample_index += 1;
         if snapshot.cpu_ready {
             self.history.push_back(HistoryPoint {
@@ -708,6 +833,20 @@ impl SystemMonitorApp {
             return;
         };
         let seq = self.last_seq;
+        if self.page == Page::Overview && self.overview_seq != Some(seq) {
+            let age_millis = self
+                .snapshot_sampled_instant
+                .map(|instant| instant.elapsed().as_secs().saturating_mul(1000));
+            self.overview = Some(Arc::new(system_monitor_x::insights::build_overview(
+                &snapshot,
+                system_monitor_x::insights::SnapshotObservedAge {
+                    age_millis,
+                    paused: self.paused,
+                },
+            )));
+            self.overview_seq = Some(seq);
+        }
+        self.refresh_overview_age(cx);
         if matches!(self.page, Page::Processes | Page::Details)
             && self.process_display_seq != Some(seq)
         {
@@ -839,6 +978,9 @@ impl SystemMonitorApp {
         }
     }
     fn set_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        // A page change can remove the focused search input from the window.
+        // Keep global navigation bound to a focus target that stays rendered.
+        window.focus(&self.focus_handle, cx);
         self.page = page;
         self.search.update(cx, |input, cx| {
             input.set_placeholder(tr(page.search_source()), window, cx)
@@ -934,9 +1076,16 @@ impl SystemMonitorApp {
     }
     fn toggle_pause(&mut self, _: &TogglePause, _: &mut Window, cx: &mut Context<Self>) {
         self.paused = !self.paused;
+        self.refresh_overview_age(cx);
         cx.notify();
     }
     fn focus_search(&mut self, _: &FocusSearch, w: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.page,
+            Page::Overview | Page::Performance | Page::Devices | Page::Settings
+        ) {
+            self.set_page(Page::Processes, w, cx);
+        }
         self.search.update(cx, |s, cx| s.focus(w, cx));
     }
     fn run_operation(
@@ -1222,6 +1371,7 @@ impl SystemMonitorApp {
                     .overflow_y_scroll()
                     .children(
                         [
+                            Page::Overview,
                             Page::Processes,
                             Page::Performance,
                             Page::History,
@@ -1666,7 +1816,22 @@ impl SystemMonitorApp {
                     )
                 },
             )
-            .child(self.extra_process_controls(p, cx))
+            .child(self.extra_process_controls(p.clone(), cx))
+            .child(
+                Button::new("process-toolkit")
+                    .small()
+                    .ghost()
+                    .label(tr("进程工具"))
+                    .disabled(p.start_time_windows_ticks.is_none())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_process_tools(
+                            p.pid,
+                            p.start_time_windows_ticks.unwrap_or(0),
+                            window,
+                            cx,
+                        )
+                    })),
+            )
             .child(self.selected_process_details(cx))
             .into_any_element()
     }
@@ -1933,7 +2098,7 @@ impl SystemMonitorApp {
     fn detail_row(
         label: impl Into<SharedString>,
         value: impl Into<SharedString>,
-        cx: &Context<Self>,
+        cx: &App,
     ) -> AnyElement {
         h_flex()
             .py_3()
@@ -2412,6 +2577,17 @@ impl SystemMonitorApp {
                             .flex_shrink_0()
                             .gap_2()
                             .child(
+                                Button::new("quick-actions")
+                                    .ghost()
+                                    .small()
+                                    .icon(UiIcon::Search)
+                                    .label(tr("快捷操作"))
+                                    .tooltip("Ctrl + Shift + P")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.quick_actions(&QuickActions, window, cx)
+                                    })),
+                            )
+                            .child(
                                 Button::new("pause")
                                     .ghost()
                                     .small()
@@ -2450,11 +2626,17 @@ impl SystemMonitorApp {
                 ),
                 |element| {
                     element.child(
-                        div().w_full().child(
-                            Input::new(&self.search)
-                                .prefix(Icon::new(UiIcon::Search).size(px(16.)))
-                                .small(),
-                        ),
+                        div()
+                            .w_full()
+                            .child(
+                                Input::new(&self.search)
+                                    .prefix(Icon::new(UiIcon::Search).size(px(16.)))
+                                    .small(),
+                            )
+                            .when(
+                                matches!(self.page, Page::Processes | Page::Details | Page::Ports),
+                                |e| e.child(self.saved_search_strip(cx)),
+                            ),
                     )
                 },
             )
@@ -2506,7 +2688,7 @@ impl SystemMonitorApp {
     }
     fn settings_view(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex().id("settings-scroll").size_full().overflow_y_scroll().p_8().gap_6().child(self.language_selector(cx)).child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("采样与外观")))
-            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("刷新间隔"))).children([(500,"0.5 秒"),(1000,"1 秒"),(2000,"2 秒")].into_iter().map(|(ms,label)|Button::new(format!("interval-{ms}")).label(tr(label)).when(self.settings.interval_ms==ms,|b|b.primary()).on_click(cx.listener(move|this,_,_,cx|{this.settings.interval_ms=ms;this.interval.store(ms,Ordering::Relaxed);let _=this.settings_writer.send(this.settings.clone());cx.notify();})))))
+            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("刷新间隔"))).children([(500,"0.5 秒"),(1000,"1 秒"),(2000,"2 秒"),(5000,"5 秒")].into_iter().map(|(ms,label)|Button::new(format!("interval-{ms}")).label(tr(label)).when(self.settings.interval_ms==ms,|b|b.primary()).on_click(cx.listener(move|this,_,_,cx|{this.settings.interval_ms=ms;this.interval.store(ms,Ordering::Relaxed);let _=this.settings_writer.send(this.settings.clone());cx.notify();})))))
             .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("主题"))).child(Button::new("theme").label(tr(if self.settings.dark {"切换为浅色"}else{"切换为深色"})).on_click(cx.listener(|this,_,w,cx|{this.settings.dark = !this.settings.dark;Theme::change(if this.settings.dark{ThemeMode::Dark}else{ThemeMode::Light},Some(w),cx);let _=this.settings_writer.send(this.settings.clone());cx.notify();}))))
             .child(div().pt_5().border_t_1().border_color(cx.theme().border).text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("快捷键"))).child(Self::detail_row("Ctrl + F",trs("搜索"),cx)).child(Self::detail_row("Ctrl + N",trs("运行新任务"),cx)).child(Self::detail_row("Ctrl + E",trs("导出进程 CSV"),cx)).child(Self::detail_row("Ctrl + P",trs("暂停 / 恢复显示"),cx))
             .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("窗口置顶"))).child(Button::new("topmost").label(tr(if self.settings.always_on_top {"已开启 · 点击关闭"} else {"开启置顶"})).on_click(cx.listener(|this,_,window,cx| {
@@ -2518,6 +2700,8 @@ impl SystemMonitorApp {
             }))))
             .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("访问权限"))).child(Button::new("elevate").label(tr(if self.elevated {"已是管理员"} else {"以管理员身份重新启动"})).disabled(self.elevated || self.operation_busy).on_click(cx.listener(|this,_,_,cx| this.restart_as_admin(cx)))))
             .child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr("逐进程网络跟踪、其他用户的进程及部分管理操作需要管理员权限。重新启动时由 Windows 请求权限确认。")))
+            .child(h_flex().gap_6().child(tr("启动页")).child(Button::new("start-page").label(tr(if self.settings.start_on_overview { "概览" } else { "进程" })).on_click(cx.listener(|this,_,_,cx|{this.settings.start_on_overview = !this.settings.start_on_overview;let _=this.settings_writer.send(this.settings.clone());cx.notify();}))))
+            .child(Button::new("settings-help").ghost().label(tr("使用帮助")).on_click(cx.listener(|this,_,w,cx|this.show_help(&ShowHelp,w,cx))))
             .child(self.update_panel(cx))
             .child(div().pt_5().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("关于 SystemMonitorX"))).child(div().text_color(cx.theme().muted_foreground).child(tf("v{} · 原生 Rust · Longbridge GPUI Kit 0.7.3 · Windows 10 1803+ / 11 x64", &[("arg0", env!("CARGO_PKG_VERSION").to_string())])))
             .child(div().text_color(cx.theme().muted_foreground).child(tr("数据来自 Windows 原生进程接口、DXGI、PDH、ETW、WMI 和 NVML。GPU 使用率显示最忙引擎；DirectX 12 能力按显卡实际查询。驱动或权限未提供的字段显示 —。")))
@@ -2545,6 +2729,12 @@ impl Render for SystemMonitorApp {
             .on_action(cx.listener(Self::toggle_pause))
             .on_action(cx.listener(Self::new_task))
             .on_action(cx.listener(Self::export_csv))
+            .on_action(cx.listener(Self::quick_actions))
+            .on_action(cx.listener(Self::show_help))
+            .on_action(cx.listener(Self::refresh_page))
+            .on_action(cx.listener(Self::go_overview))
+            .on_action(cx.listener(Self::go_processes))
+            .on_action(cx.listener(Self::go_ports))
             .child(self.sidebar(cx))
             .child(
                 v_flex()
@@ -2626,6 +2816,7 @@ impl Render for SystemMonitorApp {
                     )
                     .child(
                         div().flex_1().min_h_0().child(match self.page {
+                            Page::Overview => self.overview_view(cx),
                             Page::Processes | Page::Details => self.process_view(window, cx),
                             Page::Ports => self.ports_view(cx),
                             Page::Users => self.users_view(cx),
@@ -2732,10 +2923,19 @@ pub fn run() {
                 KeyBinding::new("ctrl-p", TogglePause, Some("SystemMonitorX")),
                 KeyBinding::new("ctrl-n", NewTask, Some("SystemMonitorX")),
                 KeyBinding::new("ctrl-e", ExportCsv, Some("SystemMonitorX")),
+                KeyBinding::new("ctrl-shift-p", QuickActions, Some("SystemMonitorX")),
+                KeyBinding::new("f1", ShowHelp, Some("SystemMonitorX")),
+                KeyBinding::new("f5", RefreshPage, Some("SystemMonitorX")),
+                KeyBinding::new("ctrl-1", GoOverview, Some("SystemMonitorX")),
+                KeyBinding::new("ctrl-2", GoProcesses, Some("SystemMonitorX")),
+                KeyBinding::new("ctrl-3", GoPorts, Some("SystemMonitorX")),
             ]);
             let testing = cfg!(feature = "ui-test")
                 && std::env::args().any(|arg| {
-                    matches!(arg.as_str(), "--ui-smoke-dir" | "--ui-update-smoke-version")
+                    matches!(
+                        arg.as_str(),
+                        "--ui-smoke-dir" | "--ui-update-smoke-version" | "--docs-screenshots-dir"
+                    )
                 });
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1380.), px(860.)), cx)),
@@ -2747,7 +2947,24 @@ pub fn run() {
                 if !testing {
                     w.activate_window();
                 }
-                cx.new(|cx| SystemMonitorApp::new(w, cx))
+                cx.new(|cx| {
+                    let mut app = SystemMonitorApp::new(w, cx);
+                    if !testing {
+                        match system_monitor_x::launch::LaunchRequest::parse(
+                            std::env::args().skip(1),
+                        ) {
+                            Ok(request) => app.apply_launch_request(request, w, cx),
+                            Err(error) => {
+                                app.message = Some(mf(
+                                    "启动参数无效：{error}",
+                                    &[("error", error.to_string())],
+                                ));
+                                app.show_help(&ShowHelp, w, cx);
+                            }
+                        }
+                    }
+                    app
+                })
             })
             .expect("open SystemMonitorX window");
             #[cfg(feature = "ui-test")]
@@ -2766,6 +2983,11 @@ pub fn run() {
                         ))
                     });
                 qa_update::start(handle, view, expected, directory, cx);
+            } else if let Some(directory) = std::env::args()
+                .skip_while(|arg| arg != "--docs-screenshots-dir")
+                .nth(1)
+            {
+                qa_docs::start(handle, view, PathBuf::from(directory), cx);
             } else if let Some(directory) = std::env::args()
                 .skip_while(|arg| arg != "--ui-smoke-dir")
                 .nth(1)
