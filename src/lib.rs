@@ -28,3 +28,7 @@ pub mod process_groups;
 pub mod name_order;
 
 pub mod network_ports;
+
+rust_i18n::i18n!("locales", fallback = "en-US");
+
+pub mod i18n;

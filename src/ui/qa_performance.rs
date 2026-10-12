@@ -162,7 +162,7 @@ async fn live_measurement(
 ) -> Result<Value> {
     cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
-            window.click("nav-进程", cx);
+            window.click("nav-processes", cx);
             window.press("ctrl-f", cx);
             replace_search(window, "", cx)
         })
@@ -410,9 +410,7 @@ fn restore(
             "model search was not cleared after native timing"
         );
         if original_page != Page::Processes {
-            handle.update(cx, |_, window, cx| {
-                window.click(format!("nav-{}", original_page.title()), cx)
-            })?;
+            handle.update(cx, |_, window, cx| window.click(original_page.id(), cx))?;
         }
         ensure!(
             view.read(cx).page == original_page,

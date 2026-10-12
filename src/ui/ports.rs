@@ -1,4 +1,5 @@
 //! Virtualized developer port table. No endpoint/owner queries run during render.
+use super::localization::{diagnostic, tr, trs};
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
     menu::{PopupMenu, PopupMenuItem},
@@ -230,6 +231,7 @@ impl TableDelegate for PortsTable {
     }
     fn column(&self, index: usize, _: &App) -> Column {
         let mut column = self.columns[index].clone();
+        column.name = tr(&column.name);
         column.sort = Some(if index != self.sort_column {
             ColumnSort::Default
         } else if self.descending {
@@ -253,7 +255,7 @@ impl TableDelegate for PortsTable {
             0 => entry
                 .process_name
                 .clone()
-                .unwrap_or_else(|| "无法读取名称".into()),
+                .unwrap_or_else(|| trs("无法读取名称")),
             1 => entry.pid.to_string(),
             2 => entry.protocol.to_string(),
             3 => entry.family.to_string(),
@@ -270,9 +272,9 @@ impl TableDelegate for PortsTable {
                 .unwrap_or_else(|| "—".into()),
             9 => {
                 if entry.creation_ticks.is_some() {
-                    "已核验创建时间".into()
+                    trs("已核验创建时间")
                 } else {
-                    "不可验证 / 禁止结束".into()
+                    trs("不可验证 / 禁止结束")
                 }
             }
             _ => String::new(),
@@ -348,7 +350,12 @@ impl TableDelegate for PortsTable {
             };
             menu = menu.item(
                 PopupMenuItem::element(move |_, _| {
-                    div().id(id).w_full().text_sm().child(label).test_support()
+                    div()
+                        .id(id)
+                        .w_full()
+                        .text_sm()
+                        .child(tr(label))
+                        .test_support()
                 })
                 .disabled(disabled)
                 .on_click(move |_, _, cx| {
@@ -362,7 +369,7 @@ impl TableDelegate for PortsTable {
             );
         }
         if let Some(note) = entry.identity_note {
-            menu = menu.label(note);
+            menu = menu.label(diagnostic(&note));
         }
         menu
     }
@@ -374,7 +381,7 @@ impl TableDelegate for PortsTable {
         div()
             .p_8()
             .text_color(cx.theme().muted_foreground)
-            .child("没有匹配的端口端点；可尝试 port:8080 或 pid:123")
+            .child(tr("没有匹配的端口端点；可尝试 port:8080 或 pid:123"))
     }
 }
 fn address_text(endpoint: std::net::SocketAddr) -> String {

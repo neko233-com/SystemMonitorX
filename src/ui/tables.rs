@@ -1,3 +1,4 @@
+use super::localization::{tf, tr, trs};
 use super::process_icons::{ExecutableIcon, IconCacheStats, ProcessIconCache};
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -42,12 +43,14 @@ pub fn percent(value: Option<f32>) -> String {
         .unwrap_or_else(|| "—".into())
 }
 pub fn duration(secs: u64) -> String {
-    format!(
+    tf(
         "{}天 {:02}:{:02}:{:02}",
-        secs / 86400,
-        secs / 3600 % 24,
-        secs / 60 % 60,
-        secs % 60
+        &[
+            ("arg0", format!("{}", secs / 86400)),
+            ("arg1", format!("{:02}", secs / 3600 % 24)),
+            ("arg2", format!("{:02}", secs / 60 % 60)),
+            ("arg3", format!("{:02}", secs % 60)),
+        ],
     )
 }
 
@@ -298,8 +301,9 @@ impl ProcessTable {
     fn visible_column(&self, visual: usize) -> Option<Column> {
         let raw = self.raw_column(visual)?;
         let mut column = self.columns[raw].clone();
+        column.name = tr(&column.name);
         if raw == 4 && self.groups_active() {
-            column.name = "GPU（成员最大）".into();
+            column.name = tr("GPU（成员最大）");
         }
         column.sort = Some(if raw == self.sort_col {
             if self.descending {
@@ -481,11 +485,11 @@ impl ProcessTable {
         })
     }
 
-    pub fn rebuild(&mut self) {
-        // Standalone model tests may replace their owned vector directly.
-        if self.snapshot.is_none() {
-            self.prepare_keys();
-        }
+    /// CSV keeps raw matching processes even when group/tree children are folded.
+    pub fn export_snapshot(&self) -> Option<(Arc<SystemSnapshot>, Vec<usize>)> {
+        Some((self.snapshot.clone()?, self.matching_process_rows()))
+    }
+    fn matching_process_rows(&self) -> Vec<usize> {
         let query = name_key(&self.query);
         let parsed = ProcessQuery::parse(&query);
         let mut rows: Vec<usize> = if self.sort_col == 0 {
@@ -553,6 +557,16 @@ impl ProcessTable {
                     .then(process_identity(a).1.cmp(&process_identity(b).1))
             });
         }
+        rows
+    }
+
+    pub fn rebuild(&mut self) {
+        // Standalone model tests may replace their owned vector directly.
+        if self.snapshot.is_none() {
+            self.prepare_keys();
+        }
+        let query = name_key(&self.query);
+        let mut rows = self.matching_process_rows();
         self.tree_rows.clear();
         self.group_headers.clear();
         self.group_children.clear();
@@ -641,6 +655,15 @@ impl ProcessTable {
             .collect()
     }
 
+    /// Only an explicitly selected group header describes the entire group;
+    /// expanded children, search results and detail/tree rows remain individual.
+    pub fn selected_group_note(&self) -> Option<&str> {
+        if !self.groups_active() {
+            return None;
+        }
+        let index = *self.rows.get(self.selected_index()?)?;
+        self.group_header(index)?.note.as_deref()
+    }
     pub fn selected_application_unavailable_reason(&self) -> Option<String> {
         if !self.groups_active() {
             return None;
@@ -650,7 +673,7 @@ impl ProcessTable {
         (group.kind == ProcessGroupKind::Application
             && group.indices.len() > 1
             && self.selected_application_targets().is_none())
-        .then(|| "应用成员的精确进程身份不可用；请展开后逐个选择可核验进程。".into())
+        .then(|| "应用成员的精确进程身份不可用；请展开后逐个选择可核验进程。".to_owned())
     }
 
     fn compare_grouped_rows(
@@ -886,7 +909,7 @@ impl TableDelegate for ProcessTable {
                         .id(action.menu_id())
                         .w_full()
                         .text_sm()
-                        .child(label)
+                        .child(tr(label))
                         .test_support()
                 })
                 .disabled(!enabled)
@@ -995,7 +1018,7 @@ impl TableDelegate for ProcessTable {
                     if self.ready {
                         percent(aggregate.cpu_usage)
                     } else {
-                        "采样中".into()
+                        trs("采样中")
                     }
                 }
                 3 => aggregate
@@ -1015,7 +1038,10 @@ impl TableDelegate for ProcessTable {
                     .parent_pid
                     .map(|pid| pid.to_string())
                     .unwrap_or_else(|| "—".into()),
-                _ => format!("应用 · {} 个进程", group.indices.len()),
+                _ => tf(
+                    "应用 · {} 个进程",
+                    &[("arg0", format!("{}", group.indices.len()))],
+                ),
             }
         } else {
             match col {
@@ -1025,7 +1051,7 @@ impl TableDelegate for ProcessTable {
                     if self.ready {
                         format!("{:.1}%", p.cpu_usage)
                     } else {
-                        "采样中".into()
+                        trs("采样中")
                     }
                 }
                 3 => bytes(p.memory_bytes),
@@ -1057,7 +1083,7 @@ impl TableDelegate for ProcessTable {
                     .session_id
                     .map(|n| n.to_string())
                     .unwrap_or_else(|| "—".into()),
-                _ => p.status.clone(),
+                _ => trs(&p.status),
             }
         };
         let intensity = if let Some(group) = self.group_header(index) {
@@ -1119,7 +1145,7 @@ impl TableDelegate for ProcessTable {
         div()
             .p_8()
             .text_color(cx.theme().muted_foreground)
-            .child("没有匹配的进程")
+            .child(tr("没有匹配的进程"))
     }
 }
 
@@ -1131,6 +1157,8 @@ pub struct TextTable {
     sort: Option<(usize, bool)>,
     numeric: Vec<usize>,
     identity_columns: Vec<usize>,
+    localized_columns: Vec<usize>,
+    selected: Option<Vec<(usize, String)>>,
 }
 impl TextTable {
     pub fn new(columns: &[(&'static str, f32)]) -> Self {
@@ -1141,6 +1169,8 @@ impl TextTable {
             sort: Some((0, false)),
             numeric: vec![],
             identity_columns: Vec::new(),
+            localized_columns: Vec::new(),
+            selected: None,
             columns: columns
                 .iter()
                 .enumerate()
@@ -1148,14 +1178,71 @@ impl TextTable {
                 .collect(),
         }
     }
-    /// Tie-break equal names with stable identity columns, not changing metrics.
+    pub fn localized_columns(mut self, columns: &[usize]) -> Self {
+        self.localized_columns = columns.to_vec();
+        self
+    }
+    /// Tie-break equal names with stable raw identity columns, including hidden
+    /// metadata fields beyond the displayed columns, never translated metrics.
     pub fn stable_identity_columns(mut self, columns: &[usize]) -> Self {
         self.identity_columns = columns
             .iter()
             .copied()
-            .filter(|column| *column < self.columns.len())
+            .filter(|column| *column < 64)
             .collect();
         self
+    }
+    /// Capture the raw identity of the selected visible row. Duplicate or
+    /// incomplete identities are refused, even if filtering hides a duplicate.
+    pub fn select_row(&mut self, row: Option<usize>) {
+        self.selected = row
+            .and_then(|index| self.rows.get(index))
+            .and_then(|row| self.row_identity(row));
+        if self.selected_row().is_none() {
+            self.selected = None;
+        }
+    }
+    /// Resolve selection after a refresh, query, or sort without inheriting an
+    /// old row index. Raw name and configured identity columns stay exact.
+    pub fn selected_row(&self) -> Option<usize> {
+        let identity = self.selected.as_deref()?;
+        Self::unique_identity_index(&self.all, identity)?;
+        Self::unique_identity_index(&self.rows, identity)
+    }
+    fn row_identity(&self, row: &[String]) -> Option<Vec<(usize, String)>> {
+        let mut identity = vec![(0, row.first()?.clone())];
+        if identity[0].1.is_empty() {
+            return None;
+        }
+        for &column in &self.identity_columns {
+            if column == 0 || identity.iter().any(|(index, _)| *index == column) {
+                continue;
+            }
+            let value = row.get(column)?;
+            if value.is_empty() {
+                return None;
+            }
+            identity.push((column, value.clone()));
+        }
+        Some(identity)
+    }
+    fn unique_identity_index(rows: &[Vec<String>], identity: &[(usize, String)]) -> Option<usize> {
+        let mut matches = rows.iter().enumerate().filter(|(_, row)| {
+            identity
+                .iter()
+                .all(|(column, value)| row.get(*column) == Some(value))
+        });
+        let (index, _) = matches.next()?;
+        matches.next().is_none().then_some(index)
+    }
+    /// Call from ColumnWidthsChanged before refreshing translated headers.
+    /// Visible columns must keep their original order (disable column moving).
+    pub fn set_column_widths(&mut self, widths: &[Pixels]) {
+        for (column, width) in self.columns.iter_mut().zip(widths.iter().copied()) {
+            if width.as_f32().is_finite() {
+                column.width = width.clamp(column.min_width, column.max_width);
+            }
+        }
     }
     fn stable_secondary(
         a: &[String],
@@ -1192,11 +1279,28 @@ impl TextTable {
         self
     }
     pub fn rebuild(&mut self) {
+        self.rebuild_in(system_monitor_x::i18n::current_language());
+    }
+    fn rebuild_in(&mut self, language: system_monitor_x::i18n::Language) {
         let q = name_key(&self.query);
         self.rows = self
             .all
             .iter()
-            .filter(|r| r.iter().any(|s| name_key(s).contains(&q)))
+            .filter(|row| {
+                q.is_empty()
+                    || row
+                        .iter()
+                        .take(self.columns.len())
+                        .enumerate()
+                        .any(|(column, value)| {
+                            name_key(value).contains(&q)
+                                || (self.localized_columns.contains(&column)
+                                    && name_key(&system_monitor_x::i18n::text_source_in(
+                                        language, value,
+                                    ))
+                                    .contains(&q))
+                        })
+            })
             .cloned()
             .collect();
         if let Some((column, descending)) = self.sort {
@@ -1212,6 +1316,23 @@ impl TextTable {
                 let order = if descending { order.reverse() } else { order };
                 order.then_with(|| Self::stable_secondary(a, b, identity_columns, numeric_columns))
             });
+        }
+        if self.selected_row().is_none() {
+            self.selected = None;
+        }
+    }
+}
+/// Update the native highlight after the delegate remaps a stable raw identity.
+pub fn sync_text_selection(
+    table: &mut TableState<TextTable>,
+    cx: &mut Context<TableState<TextTable>>,
+) {
+    let row = table.delegate().selected_row();
+    if row != table.selected_row() {
+        if let Some(row) = row {
+            table.set_selected_row(row, cx);
+        } else {
+            table.clear_selection(cx);
         }
     }
 }
@@ -1235,7 +1356,14 @@ impl TableDelegate for TextTable {
         self.rows.len()
     }
     fn column(&self, i: usize, _: &App) -> Column {
-        self.columns[i].clone()
+        let mut column = self.columns[i].clone();
+        column.name = tr(&column.name);
+        column.sort = Some(match self.sort {
+            Some((index, true)) if index == i => ColumnSort::Descending,
+            Some((index, false)) if index == i => ColumnSort::Ascending,
+            _ => ColumnSort::Default,
+        });
+        column
     }
     fn render_td(
         &mut self,
@@ -1253,17 +1381,22 @@ impl TableDelegate for TextTable {
             } else {
                 cx.theme().muted_foreground
             })
-            .child(self.rows[r][c].clone())
+            .child(if self.localized_columns.contains(&c) {
+                trs(&self.rows[r][c])
+            } else {
+                self.rows[r][c].clone()
+            })
     }
     fn perform_sort(
         &mut self,
         c: usize,
         s: ColumnSort,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) {
         self.sort = Some((c, matches!(s, ColumnSort::Descending)));
         self.rebuild();
+        cx.defer_in(window, |table, _, cx| sync_text_selection(table, cx));
         cx.notify();
     }
 }
@@ -1338,6 +1471,131 @@ mod tests {
         t.query = "two.exe".into();
         t.rebuild();
         assert!(t.selection().is_none());
+    }
+    #[test]
+    fn text_filter_matches_current_translations_and_never_hidden_identity() {
+        use system_monitor_x::i18n::Language;
+        let mut table = super::TextTable::new(&[("Name", 120.), ("State", 120.)])
+            .localized_columns(&[1])
+            .stable_identity_columns(&[2]);
+        table.all = vec![vec!["service".into(), "运行中".into(), "opaque-key".into()]];
+        table.query = "running".into();
+        table.rebuild_in(Language::EnUs);
+        assert_eq!(table.rows.len(), 1);
+        table.select_row(Some(0));
+        table.rebuild_in(Language::ZhCn);
+        assert!(table.rows.is_empty());
+        assert_eq!(table.selected_row(), None);
+        table.query = "运行中".into();
+        table.rebuild_in(Language::EnUs);
+        assert_eq!(table.rows.len(), 1); // Raw source remains searchable too.
+        table.query = "opaque-key".into();
+        table.rebuild_in(Language::EnUs);
+        assert!(table.rows.is_empty());
+        table.query.clear();
+        table.rebuild_in(Language::JaJp);
+        assert_eq!(table.rows[0][1], "运行中"); // Presentation never rewrites raw data.
+    }
+
+    #[test]
+    fn text_selection_remaps_sort_and_filter_then_clears_disappearing_identity() {
+        let mut table = super::TextTable::new(&[("Name", 120.)]);
+        table.all = vec![vec!["A".into()], vec!["B".into()], vec!["C".into()]];
+        table.rebuild();
+        table.select_row(Some(0));
+        table.sort = Some((0, true));
+        table.rebuild();
+        assert_eq!(table.selected_row(), Some(2));
+        assert_eq!(table.rows[table.selected_row().unwrap()][0], "A");
+        table.select_row(Some(1));
+        table.query = "B".into();
+        table.rebuild();
+        assert_eq!(table.selected_row(), Some(0));
+        table.query = "C".into();
+        table.rebuild();
+        assert_eq!(table.selected_row(), None); // It must not inherit C's index 0.
+        table.query.clear();
+        table.rebuild();
+        assert_eq!(table.selected_row(), None); // Clearing a query does not reselect.
+    }
+
+    #[test]
+    fn text_selection_uses_hidden_raw_keys_and_rejects_reuse_or_duplicates() {
+        let mut table = super::TextTable::new(&[("Name", 120.), ("State", 120.)])
+            .localized_columns(&[1])
+            .stable_identity_columns(&[2]);
+        table.all = vec![
+            vec!["same".into(), "运行中".into(), "key-A".into()],
+            vec!["same".into(), "已停止".into(), "key-B".into()],
+        ];
+        table.rebuild();
+        table.select_row(Some(0));
+        table.all[0][1] = "已禁用".into();
+        table.all.reverse();
+        table.rebuild();
+        assert_eq!(table.rows[table.selected_row().unwrap()][2], "key-A");
+        table.all.retain(|row| row[2] != "key-A");
+        table
+            .all
+            .push(vec!["same".into(), "运行中".into(), "key-C".into()]);
+        table.rebuild();
+        assert_eq!(table.selected_row(), None);
+        table.all = vec![
+            vec!["same".into(), "运行中".into(), "duplicate".into()],
+            vec!["same".into(), "已禁用".into(), "duplicate".into()],
+        ];
+        table.query = "运行中".into();
+        table.rebuild();
+        assert_eq!(table.rows.len(), 1);
+        table.select_row(Some(0));
+        assert_eq!(table.selected_row(), None); // Hidden duplicate remains unsafe.
+        table.all = vec![vec!["same".into(), "运行中".into()]];
+        table.rebuild();
+        table.select_row(Some(0));
+        assert_eq!(table.selected_row(), None); // Missing configured identity.
+    }
+
+    #[test]
+    fn text_widths_survive_locale_rebuild_and_ignore_nonfinite_values() {
+        use system_monitor_x::i18n::Language;
+        let mut table = super::TextTable::new(&[("Name", 120.), ("State", 120.)]);
+        table.set_column_widths(&[px(333.), px(222.)]);
+        assert_eq!(table.columns[0].width, px(333.));
+        assert_eq!(table.columns[1].width, px(222.));
+        table.all = vec![vec!["one".into(), "运行中".into()]];
+        table.rebuild_in(Language::EnUs);
+        table.rebuild_in(Language::JaJp);
+        table.set_column_widths(&[px(f32::NAN), px(f32::INFINITY)]);
+        assert_eq!(table.columns[0].width, px(333.));
+        assert_eq!(table.columns[1].width, px(222.));
+        let minimum = table.columns[0].min_width;
+        table.set_column_widths(&[px(-100.)]);
+        assert_eq!(table.columns[0].width, minimum);
+    }
+
+    #[test]
+    fn selected_group_note_never_applies_to_expanded_child_or_raw_search() {
+        let mut table = ProcessTable::new();
+        table.set_snapshot(application_fixture(false));
+        table.group_mode = true;
+        table.rebuild();
+        table.selected = Some((11, 100));
+        let root_note = table.selected_group_note().unwrap().to_owned();
+        assert!(root_note.contains("GPU"));
+        let key = table.application_groups()[0].key.clone();
+        table.toggle_application_group(&key);
+        table.selected = Some((12, 200));
+        assert_eq!(table.selected_group_note(), None);
+        table.selected = Some((11, 100));
+        table.query = "app-root".into();
+        table.rebuild();
+        assert_eq!(table.selected_group_note(), None);
+        table.query.clear();
+        table.rebuild();
+        assert_eq!(table.selected_group_note(), Some(root_note.as_str()));
+        table.group_mode = false;
+        table.rebuild();
+        assert_eq!(table.selected_group_note(), None);
     }
     #[test]
     fn text_sort_persists_after_filter_or_refresh() {
@@ -1543,6 +1801,38 @@ mod tests {
         table.set_column_widths(&[px(f32::NAN)]);
         assert!(table.columns[0].width.as_f32().is_finite());
     }
+    #[test]
+    fn process_csv_query_keeps_folded_members_and_its_original_snapshot_identity() {
+        let original = application_fixture(false);
+        let mut table = ProcessTable::new();
+        table.group_mode = true;
+        table.set_snapshot(original.clone());
+        assert!(table.rows.len() < original.processes.len());
+        let (captured, all) = table.export_snapshot().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&captured, &original));
+        assert_eq!(all.len(), original.processes.len());
+        table.query = "pid:12".into();
+        table.rebuild();
+        let (captured, selected) = table.export_snapshot().unwrap();
+        assert_eq!(selected.len(), 1);
+        let old_birth = captured.processes[selected[0]].start_time_windows_ticks;
+        let mut replacement = (*original).clone();
+        replacement.processes.reverse();
+        replacement
+            .processes
+            .iter_mut()
+            .find(|process| process.pid == 12)
+            .unwrap()
+            .start_time_windows_ticks = Some(99_999);
+        table.set_snapshot(std::sync::Arc::new(replacement));
+        assert_eq!(captured.processes[selected[0]].pid, 12);
+        assert_eq!(
+            captured.processes[selected[0]].start_time_windows_ticks,
+            old_birth
+        );
+        assert_ne!(table.row(0).unwrap().start_time_windows_ticks, old_birth);
+    }
+
     fn application_fixture(
         reordered: bool,
     ) -> std::sync::Arc<system_monitor_x::monitor::SystemSnapshot> {
@@ -1632,7 +1922,7 @@ mod tests {
         assert_eq!(table.rows, vec![0, 2]);
         assert_eq!(
             table.visible_column(4).unwrap().name.to_string(),
-            "GPU（成员最大）"
+            super::trs("GPU（成员最大）")
         );
     }
 

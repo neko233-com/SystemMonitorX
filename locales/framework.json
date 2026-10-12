@@ -1,0 +1,263 @@
+{
+  "_version": 2,
+  "gpui_component.Dialog.ok": {
+    "zh-CN": "确定",
+    "en-US": "OK",
+    "ja-JP": "OK",
+    "ko-KR": "확인",
+    "de-DE": "OK",
+    "fr-FR": "OK",
+    "es-ES": "Aceptar",
+    "pt-BR": "OK"
+  },
+  "gpui_component.Dialog.cancel": {
+    "zh-CN": "取消",
+    "en-US": "Cancel",
+    "ja-JP": "キャンセル",
+    "ko-KR": "취소",
+    "de-DE": "Abbrechen",
+    "fr-FR": "Annuler",
+    "es-ES": "Cancelar",
+    "pt-BR": "Cancelar"
+  },
+  "gpui_component.Input.Decrement": {
+    "zh-CN": "减少",
+    "en-US": "Decrement",
+    "ja-JP": "減らす",
+    "ko-KR": "감소",
+    "de-DE": "Verringern",
+    "fr-FR": "Diminuer",
+    "es-ES": "Disminuir",
+    "pt-BR": "Diminuir"
+  },
+  "gpui_component.Input.Increment": {
+    "zh-CN": "增加",
+    "en-US": "Increment",
+    "ja-JP": "増やす",
+    "ko-KR": "증가",
+    "de-DE": "Erhöhen",
+    "fr-FR": "Augmenter",
+    "es-ES": "Aumentar",
+    "pt-BR": "Aumentar"
+  },
+  "gpui_component.Input.Replace": {
+    "zh-CN": "替换",
+    "en-US": "Replace",
+    "ja-JP": "置換",
+    "ko-KR": "바꾸기",
+    "de-DE": "Ersetzen",
+    "fr-FR": "Remplacer",
+    "es-ES": "Reemplazar",
+    "pt-BR": "Substituir"
+  },
+  "gpui_component.Input.Replace All": {
+    "zh-CN": "全部替换",
+    "en-US": "Replace all",
+    "ja-JP": "すべて置換",
+    "ko-KR": "모두 바꾸기",
+    "de-DE": "Alle ersetzen",
+    "fr-FR": "Tout remplacer",
+    "es-ES": "Reemplazar todo",
+    "pt-BR": "Substituir tudo"
+  },
+  "gpui_component.Input.Cut": {
+    "zh-CN": "剪切",
+    "en-US": "Cut",
+    "ja-JP": "切り取り",
+    "ko-KR": "잘라내기",
+    "de-DE": "Ausschneiden",
+    "fr-FR": "Couper",
+    "es-ES": "Cortar",
+    "pt-BR": "Recortar"
+  },
+  "gpui_component.Input.Copy": {
+    "zh-CN": "复制",
+    "en-US": "Copy",
+    "ja-JP": "コピー",
+    "ko-KR": "복사",
+    "de-DE": "Kopieren",
+    "fr-FR": "Copier",
+    "es-ES": "Copiar",
+    "pt-BR": "Copiar"
+  },
+  "gpui_component.Input.Paste": {
+    "zh-CN": "粘贴",
+    "en-US": "Paste",
+    "ja-JP": "貼り付け",
+    "ko-KR": "붙여넣기",
+    "de-DE": "Einfügen",
+    "fr-FR": "Coller",
+    "es-ES": "Pegar",
+    "pt-BR": "Colar"
+  },
+  "gpui_component.Input.Select All": {
+    "zh-CN": "全选",
+    "en-US": "Select all",
+    "ja-JP": "すべて選択",
+    "ko-KR": "모두 선택",
+    "de-DE": "Alles auswählen",
+    "fr-FR": "Tout sélectionner",
+    "es-ES": "Seleccionar todo",
+    "pt-BR": "Selecionar tudo"
+  },
+  "gpui_component.Input.Go to Definition": {
+    "zh-CN": "跳转到定义",
+    "en-US": "Go to definition",
+    "ja-JP": "定義へ移動",
+    "ko-KR": "정의로 이동",
+    "de-DE": "Zur Definition wechseln",
+    "fr-FR": "Aller à la définition",
+    "es-ES": "Ir a la definición",
+    "pt-BR": "Ir para a definição"
+  },
+  "gpui_component.Input.Show Code Actions": {
+    "zh-CN": "显示代码操作",
+    "en-US": "Show code actions",
+    "ja-JP": "コード アクションを表示",
+    "ko-KR": "코드 작업 표시",
+    "de-DE": "Codeaktionen anzeigen",
+    "fr-FR": "Afficher les actions de code",
+    "es-ES": "Mostrar acciones de código",
+    "pt-BR": "Mostrar ações de código"
+  },
+  "gpui_component.Select.placeholder": {
+    "zh-CN": "请选择",
+    "en-US": "Please select",
+    "ja-JP": "選択してください",
+    "ko-KR": "선택하세요",
+    "de-DE": "Bitte auswählen",
+    "fr-FR": "Veuillez sélectionner",
+    "es-ES": "Seleccione",
+    "pt-BR": "Selecione"
+  },
+  "gpui_component.ComboBox.placeholder": {
+    "zh-CN": "请选择",
+    "en-US": "Please select",
+    "ja-JP": "選択してください",
+    "ko-KR": "선택하세요",
+    "de-DE": "Bitte auswählen",
+    "fr-FR": "Veuillez sélectionner",
+    "es-ES": "Seleccione",
+    "pt-BR": "Selecione"
+  },
+  "gpui_component.ComboBox.search_placeholder": {
+    "zh-CN": "搜索…",
+    "en-US": "Search…",
+    "ja-JP": "検索…",
+    "ko-KR": "검색…",
+    "de-DE": "Suchen…",
+    "fr-FR": "Rechercher…",
+    "es-ES": "Buscar…",
+    "pt-BR": "Pesquisar…"
+  },
+  "gpui_component.ComboBox.empty": {
+    "zh-CN": "暂无数据",
+    "en-US": "No results",
+    "ja-JP": "結果なし",
+    "ko-KR": "결과 없음",
+    "de-DE": "Keine Ergebnisse",
+    "fr-FR": "Aucun résultat",
+    "es-ES": "Sin resultados",
+    "pt-BR": "Nenhum resultado"
+  },
+  "gpui_component.List.search_placeholder": {
+    "zh-CN": "搜索…",
+    "en-US": "Search…",
+    "ja-JP": "検索…",
+    "ko-KR": "검색…",
+    "de-DE": "Suchen…",
+    "fr-FR": "Rechercher…",
+    "es-ES": "Buscar…",
+    "pt-BR": "Pesquisar…"
+  },
+  "gpui_component.Command.placeholder": {
+    "zh-CN": "输入命令或搜索…",
+    "en-US": "Type a command or search…",
+    "ja-JP": "コマンドを入力するか検索…",
+    "ko-KR": "명령을 입력하거나 검색…",
+    "de-DE": "Befehl eingeben oder suchen…",
+    "fr-FR": "Saisir une commande ou rechercher…",
+    "es-ES": "Escriba un comando o busque…",
+    "pt-BR": "Digite um comando ou pesquise…"
+  },
+  "gpui_component.Command.empty": {
+    "zh-CN": "未找到结果。",
+    "en-US": "No results found.",
+    "ja-JP": "結果が見つかりません。",
+    "ko-KR": "검색 결과가 없습니다.",
+    "de-DE": "Keine Ergebnisse gefunden.",
+    "fr-FR": "Aucun résultat trouvé.",
+    "es-ES": "No se encontraron resultados.",
+    "pt-BR": "Nenhum resultado encontrado."
+  },
+  "gpui_component.Settings.search_placeholder": {
+    "zh-CN": "搜索…",
+    "en-US": "Search…",
+    "ja-JP": "検索…",
+    "ko-KR": "검색…",
+    "de-DE": "Suchen…",
+    "fr-FR": "Rechercher…",
+    "es-ES": "Buscar…",
+    "pt-BR": "Pesquisar…"
+  },
+  "gpui_component.Settings.Reset All": {
+    "zh-CN": "重置全部",
+    "en-US": "Reset all",
+    "ja-JP": "すべてリセット",
+    "ko-KR": "모두 재설정",
+    "de-DE": "Alles zurücksetzen",
+    "fr-FR": "Tout réinitialiser",
+    "es-ES": "Restablecer todo",
+    "pt-BR": "Redefinir tudo"
+  },
+  "gpui_component.Attachment.Remove": {
+    "zh-CN": "移除",
+    "en-US": "Remove",
+    "ja-JP": "削除",
+    "ko-KR": "제거",
+    "de-DE": "Entfernen",
+    "fr-FR": "Supprimer",
+    "es-ES": "Eliminar",
+    "pt-BR": "Remover"
+  },
+  "gpui_component.Attachment.Retry": {
+    "zh-CN": "重试",
+    "en-US": "Retry",
+    "ja-JP": "再試行",
+    "ko-KR": "다시 시도",
+    "de-DE": "Erneut versuchen",
+    "fr-FR": "Réessayer",
+    "es-ES": "Reintentar",
+    "pt-BR": "Tentar novamente"
+  },
+  "gpui_component.Pagination.previous": {
+    "zh-CN": "上一页",
+    "en-US": "Previous",
+    "ja-JP": "前へ",
+    "ko-KR": "이전",
+    "de-DE": "Zurück",
+    "fr-FR": "Précédent",
+    "es-ES": "Anterior",
+    "pt-BR": "Anterior"
+  },
+  "gpui_component.Pagination.next": {
+    "zh-CN": "下一页",
+    "en-US": "Next",
+    "ja-JP": "次へ",
+    "ko-KR": "다음",
+    "de-DE": "Weiter",
+    "fr-FR": "Suivant",
+    "es-ES": "Siguiente",
+    "pt-BR": "Próximo"
+  },
+  "gpui_component.Table.SortBy": {
+    "zh-CN": "按 %{column} 排序",
+    "en-US": "Sort by %{column}",
+    "ja-JP": "%{column} で並べ替え",
+    "ko-KR": "%{column} 기준 정렬",
+    "de-DE": "Nach %{column} sortieren",
+    "fr-FR": "Trier par %{column}",
+    "es-ES": "Ordenar por %{column}",
+    "pt-BR": "Ordenar por %{column}"
+  }
+}

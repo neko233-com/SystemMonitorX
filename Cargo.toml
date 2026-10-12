@@ -1,6 +1,6 @@
 [package]
 name = "system-monitor-x"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.96"
 description = "A native Windows task manager built with Rust and GPUI Kit"
@@ -21,7 +21,7 @@ path = "src/bin/update_helper.rs"
 
 [dependencies]
 anyhow = "1"
-gpui-kit = "=0.7.1"
+gpui-kit = "=0.7.3"
 sysinfo = "=0.39.6"
 smol = "2"
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,7 @@ serde_json = "1"
 semver = "1"
 sha2 = "0.10"
 raw-window-handle = "0.6"
+rust-i18n = "=4.2.4"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "=0.18.4"
@@ -45,7 +46,7 @@ windows = { version = "0.62.2", features = [
   "Win32_System_RemoteDesktop", "Win32_Security_Authorization",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Diagnostics_Etw",
-  "Win32_System_Time", "Win32_System_Power",
+  "Win32_System_Time", "Win32_System_Power", "Win32_Globalization",
     "Win32_Security_WinTrust", "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Sip",
 ] }
 

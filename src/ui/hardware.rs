@@ -1,5 +1,6 @@
+use super::localization::{tf_in, trs_in};
 use super::*;
-use system_monitor_x::hardware::HardwareInventory;
+use system_monitor_x::{cpu_topology::CacheKind, hardware::HardwareInventory, i18n::Language};
 
 #[derive(Clone)]
 pub(super) struct HardwareSection {
@@ -17,7 +18,10 @@ fn number(value: Option<u32>, suffix: &str) -> String {
         .map(|n| format!("{n}{suffix}"))
         .unwrap_or_else(|| "—".into())
 }
-fn affinity_text(values: &[system_monitor_x::cpu_topology::ProcessorAffinity]) -> String {
+fn affinity_text(
+    language: Language,
+    values: &[system_monitor_x::cpu_topology::ProcessorAffinity],
+) -> String {
     values
         .iter()
         .map(|affinity| {
@@ -27,14 +31,21 @@ fn affinity_text(values: &[system_monitor_x::cpu_topology::ProcessorAffinity]) -
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("组 {}：CPU {processors}", affinity.group)
+            tf_in(
+                language,
+                "组 {}：CPU {processors}",
+                &[
+                    ("arg0", format!("{}", affinity.group)),
+                    ("processors", processors.to_string()),
+                ],
+            )
         })
         .collect::<Vec<_>>()
         .join("；")
 }
-fn boolean(value: Option<bool>, yes: &str, no: &str) -> String {
+fn boolean(language: Language, value: Option<bool>, yes: &str, no: &str) -> String {
     value
-        .map(|value| if value { yes } else { no }.to_owned())
+        .map(|value| trs_in(language, if value { yes } else { no }))
         .unwrap_or_else(|| "—".into())
 }
 fn section(title: impl Into<String>, rows: Vec<(String, String)>) -> HardwareSection {
@@ -44,35 +55,72 @@ fn section(title: impl Into<String>, rows: Vec<(String, String)>) -> HardwareSec
     }
 }
 
+fn duration_in(language: Language, secs: u64) -> String {
+    tf_in(
+        language,
+        "{}天 {:02}:{:02}:{:02}",
+        &[
+            ("arg0", format!("{}", secs / 86400)),
+            ("arg1", format!("{:02}", secs / 3600 % 24)),
+            ("arg2", format!("{:02}", secs / 60 % 60)),
+            ("arg3", format!("{:02}", secs % 60)),
+        ],
+    )
+}
+fn cache_kind_text(language: Language, kind: &CacheKind) -> String {
+    match kind {
+        CacheKind::Unified => trs_in(language, "统一缓存"),
+        CacheKind::Instruction => trs_in(language, "指令"),
+        CacheKind::Data => trs_in(language, "数据"),
+        CacheKind::Trace => trs_in(language, "追踪"),
+        CacheKind::Unknown(value) => tf_in(
+            language,
+            "未知类型 {value}",
+            &[("value", value.to_string())],
+        ),
+    }
+}
+
+fn presentation_request_is_current(
+    requested_generation: u64,
+    requested_language: Language,
+    current_generation: u64,
+    current_language: Language,
+) -> bool {
+    requested_generation == current_generation && requested_language == current_language
+}
+
 /// Format static firmware fields on the inventory worker too. Live UI frames
 /// reuse these strings instead of repeating WMI queries or device formatting.
-fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
+fn build_sections(h: &HardwareInventory, language: Language) -> Vec<HardwareSection> {
     let mut sections = Vec::new();
     if let Some(system) = &h.system {
         sections.push(section(
-            "整机",
+            trs_in(language, "整机"),
             vec![
                 (
-                    "厂商 / 型号".into(),
+                    trs_in(language, "厂商 / 型号"),
                     format!("{} · {}", text(&system.manufacturer), text(&system.model)),
                 ),
-                ("系统架构".into(), text(&system.system_type)),
+                (trs_in(language, "系统架构"), text(&system.system_type)),
             ],
         ));
     }
     if let Some(topology) = &h.cpu_topology {
         let mut rows = vec![
             (
-                "拓扑读取状态".into(),
-                if topology.complete {
-                    "完整"
-                } else {
-                    "部分可用"
-                }
-                .into(),
+                trs_in(language, "拓扑读取状态"),
+                trs_in(
+                    language,
+                    if topology.complete {
+                        "完整"
+                    } else {
+                        "部分可用"
+                    },
+                ),
             ),
             (
-                "物理插槽 / 核心 / 逻辑处理器".into(),
+                trs_in(language, "物理插槽 / 核心 / 逻辑处理器"),
                 format!(
                     "{} / {} / {}",
                     topology.packages.len(),
@@ -81,7 +129,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                 ),
             ),
             (
-                "NUMA 节点 / 活跃处理器组".into(),
+                trs_in(language, "NUMA 节点 / 活跃处理器组"),
                 format!(
                     "{} / {}",
                     topology.numa_nodes.len(),
@@ -89,7 +137,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                 ),
             ),
             (
-                "启用 SMT 的核心".into(),
+                trs_in(language, "启用 SMT 的核心"),
                 topology
                     .cores
                     .iter()
@@ -103,77 +151,126 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
             *classes.entry(core.efficiency_class).or_default() += 1;
         }
         rows.push((
-            "Windows 性能 / 能效类（原值）".into(),
+            trs_in(language, "Windows 性能 / 能效类（原值）"),
             classes
                 .into_iter()
-                .map(|(class, count)| format!("类 {class}：{count} 核心"))
+                .map(|(class, count)| {
+                    tf_in(
+                        language,
+                        "类 {class}：{count} 核心",
+                        &[("class", format!("{class}")), ("count", format!("{count}"))],
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("；"),
         ));
         for group in &topology.groups {
             rows.push((
-                format!("处理器组 {}", group.number),
-                format!(
+                tf_in(
+                    language,
+                    "处理器组 {}",
+                    &[("arg0", format!("{}", group.number))],
+                ),
+                tf_in(
+                    language,
                     "{} 活跃 / {} 上限 · 掩码 0x{:X}",
-                    group.active_processor_count,
-                    group.maximum_processor_count,
-                    group.active_processor_mask
+                    &[
+                        ("arg0", format!("{}", group.active_processor_count)),
+                        ("arg1", format!("{}", group.maximum_processor_count)),
+                        ("arg2", format!("{:X}", group.active_processor_mask)),
+                    ],
                 ),
             ));
         }
         for node in &topology.numa_nodes {
             rows.push((
                 format!("NUMA {}", node.node_number),
-                affinity_text(&node.affinities),
+                affinity_text(language, &node.affinities),
             ));
         }
         for package in &topology.packages {
             rows.push((
-                format!("物理插槽 {}", package.index),
-                affinity_text(&package.affinities),
+                tf_in(
+                    language,
+                    "物理插槽 {}",
+                    &[("arg0", format!("{}", package.index))],
+                ),
+                affinity_text(language, &package.affinities),
             ));
         }
-        sections.push(section("CPU 原生拓扑", rows));
+        sections.push(section(trs_in(language, "CPU 原生拓扑"), rows));
         sections.push(section(
-            "CPU 核心与逻辑处理器",
+            trs_in(language, "CPU 核心与逻辑处理器"),
             topology
                 .cores
                 .iter()
                 .map(|core| {
                     (
-                        format!(
+                        tf_in(
+                            language,
                             "核心 {} · 插槽 {}",
-                            core.index,
-                            number(core.package_index, "")
+                            &[
+                                ("arg0", format!("{}", core.index)),
+                                ("arg1", number(core.package_index, "").to_string()),
+                            ],
                         ),
-                        format!(
+                        tf_in(
+                            language,
                             "{} · 类 {} · {}",
-                            if core.smt { "SMT" } else { "单线程核心" },
-                            core.efficiency_class,
-                            affinity_text(&core.affinities)
+                            &[
+                                (
+                                    "arg0",
+                                    trs_in(language, if core.smt { "SMT" } else { "单线程核心" })
+                                        .to_string(),
+                                ),
+                                ("arg1", format!("{}", core.efficiency_class)),
+                                (
+                                    "arg2",
+                                    affinity_text(language, &core.affinities).to_string(),
+                                ),
+                            ],
                         ),
                     )
                 })
                 .collect(),
         ));
         sections.push(section(
-            "CPU 原生缓存",
+            trs_in(language, "CPU 原生缓存"),
             topology
                 .caches
                 .iter()
                 .map(|cache| {
                     (
-                        format!("L{} {} · #{}", cache.level, cache.kind, cache.index),
                         format!(
+                            "L{} {} · #{}",
+                            cache.level,
+                            cache_kind_text(language, &cache.kind),
+                            cache.index
+                        ),
+                        tf_in(
+                            language,
                             "{} · 缓存行 {} B · {} · {}",
-                            bytes(cache.size_bytes),
-                            cache.line_size_bytes,
-                            match cache.associativity {
-                                0 => "相联度未提供".to_owned(),
-                                255 => "全相联".to_owned(),
-                                value => format!("{value} 路相联"),
-                            },
-                            affinity_text(&cache.affinities)
+                            &[
+                                ("arg0", bytes(cache.size_bytes).to_string()),
+                                ("arg1", format!("{}", cache.line_size_bytes)),
+                                (
+                                    "arg2",
+                                    (match cache.associativity {
+                                        0 => trs_in(language, "相联度未提供"),
+                                        255 => trs_in(language, "全相联"),
+                                        value => tf_in(
+                                            language,
+                                            "{value} 路相联",
+                                            &[("value", value.to_string())],
+                                        ),
+                                    })
+                                    .to_string(),
+                                ),
+                                (
+                                    "arg3",
+                                    affinity_text(language, &cache.affinities).to_string(),
+                                ),
+                            ],
                         ),
                     )
                 })
@@ -181,14 +278,14 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
         ));
         if !topology.dies.is_empty() {
             sections.push(section(
-                "CPU 晶粒",
+                trs_in(language, "CPU 晶粒"),
                 topology
                     .dies
                     .iter()
                     .map(|die| {
                         (
-                            format!("晶粒 {}", die.index),
-                            affinity_text(&die.affinities),
+                            tf_in(language, "晶粒 {}", &[("arg0", format!("{}", die.index))]),
+                            affinity_text(language, &die.affinities),
                         )
                     })
                     .collect(),
@@ -196,14 +293,18 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
         }
         if !topology.modules.is_empty() {
             sections.push(section(
-                "CPU 模块",
+                trs_in(language, "CPU 模块"),
                 topology
                     .modules
                     .iter()
                     .map(|module| {
                         (
-                            format!("模块 {}", module.index),
-                            affinity_text(&module.affinities),
+                            tf_in(
+                                language,
+                                "模块 {}",
+                                &[("arg0", format!("{}", module.index))],
+                            ),
+                            affinity_text(language, &module.affinities),
                         )
                     })
                     .collect(),
@@ -212,60 +313,67 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
     }
     if let Some(power) = &h.power_status {
         sections.push(section(
-            "电源与电池",
+            trs_in(language, "电源与电池"),
             vec![
                 (
-                    "外接电源".into(),
-                    boolean(power.ac_online, "已连接", "未连接"),
+                    trs_in(language, "外接电源"),
+                    boolean(language, power.ac_online, "已连接", "未连接"),
                 ),
                 (
-                    "系统电池".into(),
-                    boolean(power.battery_present, "已检测到", "无系统电池"),
+                    trs_in(language, "系统电池"),
+                    boolean(language, power.battery_present, "已检测到", "无系统电池"),
                 ),
                 (
-                    "电量".into(),
+                    trs_in(language, "电量"),
                     power
                         .battery_percent
                         .map(|value| format!("{value}%"))
                         .unwrap_or_else(|| "—".into()),
                 ),
                 (
-                    "充电 / 节电模式".into(),
+                    trs_in(language, "充电 / 节电模式"),
                     format!(
                         "{} / {}",
-                        boolean(power.charging, "充电中", "未充电"),
-                        boolean(power.battery_saver, "已启用", "未启用")
+                        boolean(language, power.charging, "充电中", "未充电"),
+                        boolean(language, power.battery_saver, "已启用", "未启用")
                     ),
                 ),
                 (
-                    "预计剩余续航".into(),
+                    trs_in(language, "预计剩余续航"),
                     power
                         .remaining_seconds
-                        .map(|value| duration(u64::from(value)))
+                        .map(|value| duration_in(language, u64::from(value)))
                         .unwrap_or_else(|| "—".into()),
                 ),
-                ("状态刷新".into(), "随设备信息刷新；可手动重新读取".into()),
+                (
+                    trs_in(language, "状态刷新"),
+                    trs_in(language, "随设备信息刷新；可手动重新读取"),
+                ),
             ],
         ));
     }
     for battery in &h.batteries {
         sections.push(section(
-            format!("电池 · {}", battery.device_id),
+            tf_in(
+                language,
+                "电池 · {}",
+                &[("arg0", battery.device_id.to_string())],
+            ),
             vec![
-                ("名称 / 型号".into(), text(&battery.name)),
+                (trs_in(language, "名称 / 型号"), text(&battery.name)),
                 (
-                    "化学类型 / 状态".into(),
+                    trs_in(language, "化学类型 / 状态"),
                     format!("{} / {}", text(&battery.chemistry), text(&battery.status)),
                 ),
                 (
-                    "电量".into(),
+                    trs_in(language, "电量"),
                     battery
                         .estimated_charge_percent
                         .map(|value| format!("{value}%"))
                         .unwrap_or_else(|| "—".into()),
                 ),
                 (
-                    "设计容量 / 满充容量".into(),
+                    trs_in(language, "设计容量 / 满充容量"),
                     format!(
                         "{} / {}",
                         battery
@@ -279,62 +387,69 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "设计电压".into(),
+                    trs_in(language, "设计电压"),
                     battery
                         .design_voltage_mv
                         .map(|value| format!("{value} mV"))
                         .unwrap_or_else(|| "—".into()),
                 ),
-                ("设备标识".into(), text(&battery.pnp_device_id)),
+                (trs_in(language, "设备标识"), text(&battery.pnp_device_id)),
             ],
         ));
     }
     for board in &h.motherboards {
         sections.push(section(
-            "主板",
+            trs_in(language, "主板"),
             vec![
                 (
-                    "厂商 / 产品".into(),
+                    trs_in(language, "厂商 / 产品"),
                     format!("{} · {}", text(&board.manufacturer), text(&board.product)),
                 ),
-                ("版本".into(), text(&board.version)),
-                ("序列号".into(), text(&board.serial_number)),
+                (trs_in(language, "版本"), text(&board.version)),
+                (trs_in(language, "序列号"), text(&board.serial_number)),
             ],
         ));
     }
     for bios in &h.bios {
         sections.push(section(
-            "BIOS / 固件",
+            trs_in(language, "BIOS / 固件"),
             vec![
                 (
-                    "厂商 / 版本".into(),
+                    trs_in(language, "厂商 / 版本"),
                     format!("{} · {}", text(&bios.manufacturer), text(&bios.version)),
                 ),
-                ("发布日期".into(), text(&bios.release_date)),
+                (trs_in(language, "发布日期"), text(&bios.release_date)),
                 ("SMBIOS".into(), text(&bios.smbios_version)),
             ],
         ));
     }
     for cpu in &h.processors {
         sections.push(section(
-            format!("处理器 · {}", cpu.device_id),
+            tf_in(
+                language,
+                "处理器 · {}",
+                &[("arg0", cpu.device_id.to_string())],
+            ),
             vec![
-                ("型号".into(), text(&cpu.name)),
+                (trs_in(language, "型号"), text(&cpu.name)),
                 (
-                    "插槽 / 厂商".into(),
+                    trs_in(language, "插槽 / 厂商"),
                     format!("{} · {}", text(&cpu.socket), text(&cpu.manufacturer)),
                 ),
                 (
-                    "核心 / 线程".into(),
+                    trs_in(language, "核心 / 线程"),
                     format!(
                         "{} / {}",
                         number(cpu.physical_cores, ""),
                         number(cpu.logical_processors, "")
                     ),
                 ),
-                ("标称最高频率".into(), number(cpu.max_clock_mhz, " MHz")),
                 (
-                    "L2 / L3 缓存".into(),
+                    trs_in(language, "标称最高频率"),
+                    number(cpu.max_clock_mhz, " MHz"),
+                ),
+                (
+                    trs_in(language, "L2 / L3 缓存"),
                     format!(
                         "{} / {}",
                         capacity(cpu.l2_cache_bytes),
@@ -342,22 +457,33 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "固件虚拟化".into(),
+                    trs_in(language, "固件虚拟化"),
                     cpu.virtualization_firmware_enabled
-                        .map(|v| if v { "已启用" } else { "未启用" }.to_owned())
-                        .unwrap_or_else(|| "不可用".into()),
+                        .map(|v| trs_in(language, if v { "已启用" } else { "未启用" }))
+                        .unwrap_or_else(|| trs_in(language, "不可用")),
                 ),
             ],
         ));
     }
     if !h.cpu_caches.is_empty() {
         sections.push(section(
-            "处理器缓存",
+            trs_in(language, "处理器缓存"),
             h.cpu_caches
                 .iter()
                 .map(|cache| {
                     (
-                        format!("{} · {}", cache.device_id, number(cache.level, " 级")),
+                        format!(
+                            "{} · {}",
+                            cache.device_id,
+                            cache
+                                .level
+                                .map(|value| tf_in(
+                                    language,
+                                    "{value} 级",
+                                    &[("value", value.to_string())]
+                                ))
+                                .unwrap_or_else(|| "—".into())
+                        ),
                         format!(
                             "{} · {}",
                             capacity(cache.size_bytes),
@@ -369,25 +495,35 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
         ));
     }
     sections.push(section(
-        "内存插槽",
+        trs_in(language, "内存插槽"),
         vec![
             (
-                "已用 / 总槽位".into(),
+                trs_in(language, "已用 / 总槽位"),
                 format!(
                     "{} / {}",
                     h.memory_modules.len(),
                     number(h.memory_slots_total, "")
                 ),
             ),
-            ("固件最大容量".into(), capacity(h.memory_max_capacity_bytes)),
+            (
+                trs_in(language, "固件最大容量"),
+                capacity(h.memory_max_capacity_bytes),
+            ),
         ],
     ));
     for (index, memory) in h.memory_modules.iter().enumerate() {
         sections.push(section(
-            format!("内存模块 {} · {}", index + 1, text(&memory.device_locator)),
+            tf_in(
+                language,
+                "内存模块 {} · {}",
+                &[
+                    ("arg0", format!("{}", index + 1)),
+                    ("arg1", text(&memory.device_locator).to_string()),
+                ],
+            ),
             vec![
                 (
-                    "容量 / 类型".into(),
+                    trs_in(language, "容量 / 类型"),
                     format!(
                         "{} · {} · {}",
                         capacity(memory.capacity_bytes),
@@ -396,7 +532,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "当前 / 标称速率".into(),
+                    trs_in(language, "当前 / 标称速率"),
                     format!(
                         "{} / {}",
                         number(memory.configured_speed_mts, " MT/s"),
@@ -404,16 +540,16 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "厂商 / 料号".into(),
+                    trs_in(language, "厂商 / 料号"),
                     format!(
                         "{} · {}",
                         text(&memory.manufacturer),
                         text(&memory.part_number)
                     ),
                 ),
-                ("序列号".into(), text(&memory.serial_number)),
+                (trs_in(language, "序列号"), text(&memory.serial_number)),
                 (
-                    "数据 / 总线宽度".into(),
+                    trs_in(language, "数据 / 总线宽度"),
                     format!(
                         "{} / {}",
                         number(memory.data_width_bits, " bit"),
@@ -425,18 +561,22 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
     }
     for disk in &h.physical_disks {
         sections.push(section(
-            format!("物理存储 · {}", disk.device_id),
+            tf_in(
+                language,
+                "物理存储 · {}",
+                &[("arg0", disk.device_id.to_string())],
+            ),
             vec![
                 (
-                    "型号 / 容量".into(),
+                    trs_in(language, "型号 / 容量"),
                     format!("{} · {}", text(&disk.model), capacity(disk.capacity_bytes)),
                 ),
                 (
-                    "接口 / 介质".into(),
+                    trs_in(language, "接口 / 介质"),
                     format!("{} · {}", text(&disk.bus_type), text(&disk.media_type)),
                 ),
                 (
-                    "固件 / 序列号".into(),
+                    trs_in(language, "固件 / 序列号"),
                     format!(
                         "{} · {}",
                         text(&disk.firmware_version),
@@ -444,7 +584,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "逻辑 / 物理扇区".into(),
+                    trs_in(language, "逻辑 / 物理扇区"),
                     format!(
                         "{} / {}",
                         capacity(disk.logical_sector_bytes),
@@ -452,7 +592,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "健康状态 / 来源".into(),
+                    trs_in(language, "健康状态 / 来源"),
                     format!("{} · {}", text(&disk.health_status), disk.source),
                 ),
             ],
@@ -465,10 +605,10 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                 .unwrap_or_else(|| "—".into())
         };
         sections.push(section(
-            format!("网卡 · {}", nic.name),
+            tf_in(language, "网卡 · {}", &[("arg0", nic.name.to_string())]),
             vec![
                 (
-                    "硬件 / 状态".into(),
+                    trs_in(language, "硬件 / 状态"),
                     format!(
                         "{} · {}",
                         text(&nic.description),
@@ -476,7 +616,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "MAC / 接口索引".into(),
+                    trs_in(language, "MAC / 接口索引"),
                     format!(
                         "{} · {}",
                         text(&nic.mac_address),
@@ -484,7 +624,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "接收 / 发送链路速率".into(),
+                    trs_in(language, "接收 / 发送链路速率"),
                     format!(
                         "{} / {}",
                         link(nic.receive_link_bits_per_sec),
@@ -492,15 +632,15 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "驱动 / 提供商".into(),
+                    trs_in(language, "驱动 / 提供商"),
                     format!(
                         "{} · {}",
                         text(&nic.driver_version),
                         text(&nic.driver_provider)
                     ),
                 ),
-                ("驱动日期".into(), text(&nic.driver_date)),
-                ("硬件标识".into(), text(&nic.pnp_device_id)),
+                (trs_in(language, "驱动日期"), text(&nic.driver_date)),
+                (trs_in(language, "硬件标识"), text(&nic.pnp_device_id)),
             ],
         ));
     }
@@ -508,16 +648,19 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
         sections.push(section(
             format!(
                 "{} · {}",
-                if graphics.is_pci_device {
-                    "显卡驱动"
-                } else {
-                    "虚拟显示驱动"
-                },
+                trs_in(
+                    language,
+                    if graphics.is_pci_device {
+                        "显卡驱动"
+                    } else {
+                        "虚拟显示驱动"
+                    }
+                ),
                 graphics.name
             ),
             vec![
                 (
-                    "驱动 / 日期".into(),
+                    trs_in(language, "驱动 / 日期"),
                     format!(
                         "{} · {}",
                         text(&graphics.driver_version),
@@ -525,7 +668,7 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "当前显示模式".into(),
+                    trs_in(language, "当前显示模式"),
                     format!(
                         "{} × {} · {}",
                         number(graphics.active_width_pixels, ""),
@@ -533,16 +676,20 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                         number(graphics.active_refresh_hz, " Hz")
                     ),
                 ),
-                ("硬件标识".into(), text(&graphics.pnp_device_id)),
+                (trs_in(language, "硬件标识"), text(&graphics.pnp_device_id)),
             ],
         ));
     }
     for monitor in &h.monitors {
         sections.push(section(
-            format!("显示器 · {}", text(&monitor.friendly_name)),
+            tf_in(
+                language,
+                "显示器 · {}",
+                &[("arg0", text(&monitor.friendly_name).to_string())],
+            ),
             vec![
                 (
-                    "厂商 / 序列号".into(),
+                    trs_in(language, "厂商 / 序列号"),
                     format!(
                         "{} · {}",
                         text(&monitor.manufacturer),
@@ -550,14 +697,14 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     ),
                 ),
                 (
-                    "生产年 / 周".into(),
+                    trs_in(language, "生产年 / 周"),
                     format!(
                         "{} / {}",
                         number(monitor.manufacture_year, ""),
                         number(monitor.manufacture_week, "")
                     ),
                 ),
-                ("设备标识".into(), monitor.instance_name.clone()),
+                (trs_in(language, "设备标识"), monitor.instance_name.clone()),
             ],
         ));
     }
@@ -569,10 +716,13 @@ impl SystemMonitorApp {
             return;
         }
         self.hardware_loading = true;
+        self.hardware_display_generation = self.hardware_display_generation.wrapping_add(1);
+        let generation = self.hardware_display_generation;
+        let language = self.resolved_language;
         cx.spawn(async move |view, cx| {
-            let result = smol::unblock(|| {
+            let result = smol::unblock(move || {
                 HardwareInventory::collect().map(|inventory| {
-                    let sections = build_sections(&inventory);
+                    let sections = build_sections(&inventory, language);
                     (Arc::new(inventory), sections)
                 })
             })
@@ -581,13 +731,65 @@ impl SystemMonitorApp {
                 this.hardware_loading = false;
                 match result {
                     Ok((inventory, sections)) => {
+                        // A language switch does not discard real collection.
+                        // Only the obsolete presentation is rejected.
                         this.hardware = Some(inventory);
-                        this.hardware_sections = sections;
                         this.hardware_error = None;
+                        if presentation_request_is_current(
+                            generation,
+                            language,
+                            this.hardware_display_generation,
+                            this.resolved_language,
+                        ) {
+                            this.hardware_sections = sections;
+                        } else {
+                            this.rebuild_hardware_presentation(cx);
+                        }
                     }
-                    Err(error) => this.hardware_error = Some(format!("硬件读取失败：{error:#}")),
+                    Err(error) => {
+                        // Diagnostics retain their source language; translate
+                        // the surrounding label only when rendering.
+                        this.hardware_error = Some(format!("{error:#}"));
+                        if this.hardware.is_some() {
+                            this.rebuild_hardware_presentation(cx);
+                        }
+                    }
                 }
                 cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Reformat the cached inventory without issuing WMI/Win32 queries.
+    /// The request generation also rejects A -> B -> A completion races.
+    pub(super) fn rebuild_hardware_presentation(&mut self, cx: &mut Context<Self>) {
+        self.hardware_display_generation = self.hardware_display_generation.wrapping_add(1);
+        let generation = self.hardware_display_generation;
+        let language = self.resolved_language;
+        self.hardware_sections.clear();
+        let Some(inventory) = self.hardware.clone() else {
+            cx.notify();
+            return;
+        };
+        let expected_inventory = inventory.clone();
+        cx.spawn(async move |view, cx| {
+            let sections = smol::unblock(move || build_sections(&inventory, language)).await;
+            let _ = view.update(cx, |this, cx| {
+                if presentation_request_is_current(
+                    generation,
+                    language,
+                    this.hardware_display_generation,
+                    this.resolved_language,
+                ) && this
+                    .hardware
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &expected_inventory))
+                {
+                    this.hardware_sections = sections;
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -603,24 +805,30 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("硬件详细信息"),
+                            .child(tr("硬件详细信息")),
                     )
                     .child(
                         Button::new("refresh-hardware")
                             .small()
-                            .label(if self.hardware_loading {
+                            .label(tr(if self.hardware_loading {
                                 "读取中…"
                             } else {
                                 "刷新硬件"
-                            })
+                            }))
                             .disabled(self.hardware_loading)
                             .on_click(cx.listener(|this, _, _, cx| this.refresh_hardware(cx))),
                     ),
             )
             .when(self.hardware.is_none() && self.hardware_loading, |e| {
-                e.child("正在后台读取固件与驱动信息…")
+                e.child(tr("正在后台读取固件与驱动信息…"))
             })
-            .when_some(self.hardware_error.clone(), |e, error| e.child(error))
+            .when(
+                self.hardware.is_some() && self.hardware_sections.is_empty(),
+                |e| e.child(tr("正在更新硬件显示…")),
+            )
+            .when_some(self.hardware_error.clone(), |e, error| {
+                e.child(tf("硬件读取失败：{error:#}", &[("error", error)]))
+            })
             .children(self.hardware_sections.iter().map(|section| {
                 v_flex()
                     .gap_1()
@@ -640,18 +848,123 @@ impl SystemMonitorApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!(
+                        .child(tf(
                             "来源：Windows WMI / 固件 · 此次读取 {} ms · 静态信息按需刷新",
-                            inventory.collection_duration_ms
+                            &[("arg0", format!("{}", inventory.collection_duration_ms))],
                         )),
                 )
-                .children(
-                    inventory
-                        .issues
-                        .iter()
-                        .map(|issue| div().text_xs().child(issue.clone())),
-                )
+                .children(inventory.issues.iter().map(|issue| {
+                    div()
+                        .text_xs()
+                        .child(tf("原始诊断：{issue}", &[("issue", issue.clone())]))
+                }))
             })
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{affinity_text, build_sections, cache_kind_text, presentation_request_is_current};
+    use std::sync::Arc;
+    use system_monitor_x::{
+        cpu_topology::{CacheKind, ProcessorAffinity},
+        hardware::{HardwareInventory, ProcessorInfo, SystemHardware, SystemPowerStatus},
+        i18n::{Language, text_source_in},
+    };
+
+    #[test]
+    fn hardware_models_use_captured_language_and_preserve_real_names() {
+        let raw_manufacturer = "整机 %{issue}";
+        let raw_model = "型号 / firmware-β";
+        let inventory = Arc::new(HardwareInventory {
+            system: Some(SystemHardware {
+                manufacturer: Some(raw_manufacturer.into()),
+                model: Some(raw_model.into()),
+                system_type: Some("原始 Windows 架构".into()),
+                ..Default::default()
+            }),
+            processors: vec![ProcessorInfo {
+                device_id: "CPU-raw".into(),
+                name: Some("核心与真实品牌 %{value}".into()),
+                virtualization_firmware_enabled: None,
+                ..Default::default()
+            }],
+            power_status: Some(SystemPowerStatus {
+                ac_online: Some(true),
+                battery_present: None,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        for language in Language::SUPPORTED {
+            let sections = build_sections(&inventory, language);
+            assert_eq!(sections[0].title, text_source_in(language, "整机"));
+            if language != Language::ZhCn {
+                assert_ne!(sections[0].title, "整机");
+            }
+            assert_eq!(
+                sections[0].rows[0].1,
+                format!("{raw_manufacturer} · {raw_model}"),
+            );
+            assert_eq!(sections[0].rows[1].1, "原始 Windows 架构");
+            let power = sections
+                .iter()
+                .find(|section| section.title == text_source_in(language, "电源与电池"))
+                .unwrap();
+            assert_eq!(power.rows[0].1, text_source_in(language, "已连接"));
+            assert_eq!(power.rows[1].1, "—"); // Unknown battery is not "absent".
+            let processor = sections
+                .iter()
+                .find(|section| {
+                    section
+                        .rows
+                        .iter()
+                        .any(|row| row.1 == "核心与真实品牌 %{value}")
+                })
+                .unwrap();
+            assert_eq!(
+                processor.rows.last().unwrap().1,
+                text_source_in(language, "不可用"),
+            );
+        }
+    }
+
+    #[test]
+    fn topology_values_and_unknown_type_keep_exact_numeric_arguments() {
+        let affinities = [ProcessorAffinity {
+            group: 3,
+            mask: 0b101,
+        }];
+        for language in Language::SUPPORTED {
+            let affinity = affinity_text(language, &affinities);
+            assert!(affinity.contains('3'));
+            assert!(affinity.contains("0,2"));
+            let unknown = cache_kind_text(language, &CacheKind::Unknown(219));
+            assert!(unknown.contains("219"));
+            assert!(!unknown.contains("{value}"));
+        }
+    }
+
+    #[test]
+    fn obsolete_hardware_completion_is_rejected_after_language_aba() {
+        let first = (1, Language::EnUs);
+        let second = (2, Language::JaJp);
+        let current = (3, Language::EnUs);
+        assert!(!presentation_request_is_current(
+            first.0, first.1, current.0, current.1,
+        ));
+        assert!(!presentation_request_is_current(
+            second.0, second.1, current.0, current.1,
+        ));
+        assert!(presentation_request_is_current(
+            current.0, current.1, current.0, current.1,
+        ));
+        assert!(!presentation_request_is_current(
+            current.0,
+            Language::KoKr,
+            current.0,
+            current.1,
+        ));
     }
 }

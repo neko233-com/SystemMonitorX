@@ -42,6 +42,14 @@ try {
         . (Join-Path $PSScriptRoot 'Enter-DevEnvironment.ps1')
         & cargo fmt --all -- --check
         Assert-ExitCode 'Rust formatting'
+        # Python is a development-only lexical coverage gate; no Python ships.
+        $taskPython = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $taskPython) { throw 'Python 3 is required for UI translation verification.' }
+        & $taskPython.Source (Join-Path $PSScriptRoot 'verify-ui-localization.py') --self-test
+        Assert-ExitCode 'UI translation verifier self-tests'
+        & $taskPython.Source (Join-Path $PSScriptRoot 'verify-ui-localization.py') --check
+        Assert-ExitCode 'Eight-language UI coverage'
+
         $taskInstallSelfTest = & (Join-Path $PSScriptRoot 'Install-SystemMonitorX.ps1') -SelfTest
         if ($taskInstallSelfTest.Status -ne 'SelfTestPassed' -or $taskInstallSelfTest.Checks -lt 16) {
             throw 'PowerShell installer self-tests did not pass.'

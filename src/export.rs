@@ -1,7 +1,7 @@
 //! CSV output uses RFC 4180 quoting. Opening a spreadsheet must not turn a
 //! process name, account, status or executable path into a formula.
 use crate::monitor::{ProcessSample, SystemSnapshot};
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use std::{io::Write, path::Path};
 
 fn csv_cell(value: &str) -> String {
@@ -95,24 +95,49 @@ fn process_row(process: &ProcessSample, cpu_ready: bool) -> [String; COLUMNS.len
         decimal(process.network_transmitted_bytes_per_sec, 2),
         optional_integer(start_time.map(|_| process.run_time_secs)),
         optional_integer(process.start_time_windows_ticks.filter(|ticks| *ticks > 0)),
-        csv_cell(&process.status),
+        csv_cell(&crate::i18n::text_source_in(
+            crate::i18n::Language::EnUs,
+            &process.status,
+        )),
     ]
 }
 
-fn write_csv(snapshot: &SystemSnapshot, output: &mut impl Write) -> Result<()> {
+fn write_records<'a>(
+    cpu_ready: bool,
+    records: impl Iterator<Item = &'a ProcessSample>,
+    output: &mut impl Write,
+) -> Result<()> {
     output.write_all(b"\xef\xbb\xbf")?;
     output.write_all(COLUMNS.join(",").as_bytes())?;
     output.write_all(b"\r\n")?;
-    for process in &snapshot.processes {
-        output.write_all(
-            process_row(process, snapshot.cpu_ready)
-                .join(",")
-                .as_bytes(),
-        )?;
+    for process in records {
+        output.write_all(process_row(process, cpu_ready).join(",").as_bytes())?;
         output.write_all(b"\r\n")?;
     }
     output.flush()?;
     Ok(())
+}
+
+fn write_csv(snapshot: &SystemSnapshot, output: &mut impl Write) -> Result<()> {
+    write_records(snapshot.cpu_ready, snapshot.processes.iter(), output)
+}
+/// The indices refer to the exact immutable snapshot captured with the query.
+pub fn write_process_csv_rows(
+    snapshot: &SystemSnapshot,
+    indices: &[usize],
+    path: &Path,
+) -> Result<()> {
+    ensure!(
+        indices
+            .iter()
+            .all(|index| *index < snapshot.processes.len()),
+        "CSV selection is outside the captured process snapshot"
+    );
+    write_records(
+        snapshot.cpu_ready,
+        indices.iter().map(|index| &snapshot.processes[*index]),
+        &mut std::fs::File::create(path)?,
+    )
 }
 
 pub fn write_process_csv(snapshot: &SystemSnapshot, path: &Path) -> Result<()> {
@@ -121,7 +146,7 @@ pub fn write_process_csv(snapshot: &SystemSnapshot, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{COLUMNS, csv_cell, process_row, write_csv};
+    use super::{COLUMNS, csv_cell, process_row, write_csv, write_records};
     use crate::monitor::{ProcessSample, SystemSnapshot};
 
     fn field<'a>(row: &'a [String], column: &str) -> &'a str {
@@ -151,6 +176,39 @@ mod tests {
         ] {
             assert!(csv_cell(input).starts_with("\"'"));
         }
+    }
+
+    #[test]
+    fn selected_records_keep_schema_and_exact_birth_without_exporting_other_processes() {
+        let snapshot = SystemSnapshot {
+            cpu_ready: true,
+            processes: vec![
+                ProcessSample {
+                    pid: 1,
+                    name: "unrelated.exe".into(),
+                    ..Default::default()
+                },
+                ProcessSample {
+                    pid: 123,
+                    name: "国际-é-日本.exe".into(),
+                    start_time_windows_ticks: Some(133_456_789_123_456_789),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = Vec::new();
+        write_records(
+            snapshot.cpu_ready,
+            [1usize].iter().map(|index| &snapshot.processes[*index]),
+            &mut output,
+        )
+        .unwrap();
+        let csv = String::from_utf8(output).unwrap();
+        assert!(csv.starts_with("\u{feff}Name,PID,Parent PID,"));
+        assert_eq!(csv.lines().count(), 2);
+        assert!(csv.contains("国际-é-日本.exe") && csv.contains("133456789123456789"));
+        assert!(!csv.contains("unrelated.exe"));
     }
 
     #[test]

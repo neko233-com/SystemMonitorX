@@ -23,21 +23,21 @@ impl SystemMonitorApp {
     }
     pub(super) fn directx_details(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut body=v_flex().gap_3().child(
-            h_flex().justify_between().child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("DirectX 12 与图形功能"))
-                .child(Button::new("refresh-directx").small().ghost().label("重新检测").disabled(self.directx_loading).on_click(cx.listener(|this,_,_,cx|this.refresh_directx(cx))))
-        ).child(div().text_xs().text_color(cx.theme().muted_foreground).child("按 DXGI LUID 查询每张显卡的 Windows 运行时和驱动能力。GPU 负载采集覆盖 DirectX 12 等 WDDM 工作负载。"));
+            h_flex().justify_between().child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("DirectX 12 与图形功能")))
+                .child(Button::new("refresh-directx").small().ghost().label(tr("重新检测")).disabled(self.directx_loading).on_click(cx.listener(|this,_,_,cx|this.refresh_directx(cx))))
+        ).child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr("按 DXGI LUID 查询每张显卡的 Windows 运行时和驱动能力。GPU 负载采集覆盖 DirectX 12 等 WDDM 工作负载。")));
         if self.directx_loading {
             body = body.child(
                 div()
                     .text_color(cx.theme().muted_foreground)
-                    .child("正在后台查询图形设备能力…"),
+                    .child(tr("正在后台查询图形设备能力…")),
             );
         }
         if let Some(error) = &self.directx_error {
             body = body.child(
                 div()
                     .text_color(cx.theme().muted_foreground)
-                    .child(error.clone()),
+                    .child(tf("原始诊断：{issue}", &[("issue", error.clone())])),
             );
         }
         if let Some(inventory) = &self.directx_inventory {
@@ -65,7 +65,7 @@ impl SystemMonitorApp {
                                     "DirectX 12",
                                     adapter
                                         .d3d12_supported
-                                        .map(|v| if v { "支持" } else { "不支持" }.to_owned())
+                                        .map(|v| trs(if v { "支持" } else { "不支持" }))
                                         .unwrap_or_else(unavailable),
                                 ),
                                 (
@@ -95,7 +95,7 @@ impl SystemMonitorApp {
                                     "Enhanced Barriers",
                                     adapter
                                         .enhanced_barriers
-                                        .map(|v| if v { "支持" } else { "不支持" }.to_owned())
+                                        .map(|v| trs(if v { "支持" } else { "不支持" }))
                                         .unwrap_or_else(unavailable),
                                 ),
                                 (
@@ -111,13 +111,26 @@ impl SystemMonitorApp {
                                 ),
                             ]
                             .into_iter()
-                            .map(|(label, value)| Self::detail_row(label, value, cx)),
+                            .map(|(label, value)| {
+                                Self::detail_row(
+                                    if matches!(
+                                        label,
+                                        "功能级别 / Shader Model" | "光线追踪" | "GPU 节点 / LUID"
+                                    ) {
+                                        tr(label)
+                                    } else {
+                                        label.into()
+                                    },
+                                    value,
+                                    cx,
+                                )
+                            }),
                         )
                         .children(adapter.issues.iter().map(|note| {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(note.clone())
+                                .child(tf("原始诊断：{issue}", &[("issue", note.clone())]))
                         })),
                 );
             }
@@ -132,23 +145,26 @@ impl SystemMonitorApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("软件 / 虚拟显示适配器：{}", aliases.join("、"))),
+                        .child(tf(
+                            "软件 / 虚拟显示适配器：{}",
+                            &[("arg0", aliases.join(", ").to_string())],
+                        )),
                 );
             }
             body = body.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
+                    .child(tf(
                         "来源：DXGI + D3D12 CheckFeatureSupport · 耗时 {} ms",
-                        inventory.collection_duration_ms
+                        &[("arg0", format!("{}", inventory.collection_duration_ms))],
                     )),
             );
             body = body.children(inventory.issues.iter().map(|note| {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(note.clone())
+                    .child(tf("原始诊断：{issue}", &[("issue", note.clone())]))
             }));
         }
         body.into_any_element()

@@ -27,7 +27,7 @@ If you trust the official project script, you can also download and execute it d
 & ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/neko233-com/SystemMonitorX/main/scripts/Install-SystemMonitorX.ps1'))) -Mirror Auto
 ~~~
 
-Place parameters at the end. For example, append `-Version v0.3.0` to select that version, or `-DownloadOnly` to download without installing. Appending `-SelfTest` runs only the script's offline tests: it does not query release metadata, download a package, or install anything. To inspect the script first, use the save-and-review steps above.
+Place parameters at the end. For example, append `-Version v0.4.0` to select that version, or `-DownloadOnly` to download without installing. Appending `-SelfTest` runs only the script's offline tests: it does not query release metadata, download a package, or install anything. To inspect the script first, use the save-and-review steps above.
 
 Executing a saved `.ps1` file follows the current PowerShell execution policy. The script does not change execution policy, system proxy settings, the firewall, certificate trust, or global TLS settings. On a managed computer, use the method permitted by your administrator.
 
@@ -43,7 +43,7 @@ Preview the selected official version, SHA-256, and destination:
 
 | Parameter | Behavior |
 | --- | --- |
-| `-Version 0.3.0` or `-Version v0.3.0` | Select a stable release through the official API; omit it to use GitHub's latest stable release |
+| `-Version 0.4.0` or `-Version v0.4.0` | Select a stable release through the official API; omit it to use GitHub's latest stable release |
 | `-InstallDirectory 'D:\Apps\SystemMonitorX'` | Choose the directory for a new MSI installation; an existing MSI installation keeps its original directory, and changing it requires uninstalling first |
 | `-Reinstall` | Run the MSI again for an already installed version; downgrades are refused |
 | `-Portable` | Select the portable ZIP and extract it into a new directory, without MSI uninstall registration or a Start menu shortcut |
@@ -66,7 +66,7 @@ Download the latest MSI from official sources only:
 Download only the portable ZIP for a specific version:
 
 ~~~powershell
-& '.\Install-SystemMonitorX.ps1' -Version v0.3.0 -Portable -DownloadOnly -Mirror None
+& '.\Install-SystemMonitorX.ps1' -Version v0.4.0 -Portable -DownloadOnly -Mirror None
 ~~~
 
 Extract the portable edition into a new directory:
@@ -105,6 +105,15 @@ The trust chain is:
 SHA-256 confirms that downloaded bytes match the official release asset. It does not replace publisher code signing or trust in the project itself. If the API returns HTTP 403/429 due to rate limiting, the script validates the latest stable tag URL using the official releases/latest HEAD redirect, then reads that version's official SHA256SUMS.txt (at most 16 KiB) and asset size through an official HEAD request. This fallback confirms only the current latest stable release. For another older version, retry after API access becomes available; its release status is never guessed. If no official path can reliably provide the version and checksum, the script stops rather than trusting mirror metadata.
 
 GitHub's public resource API is available [without a token](https://docs.github.com/en/rest/releases/releases#get-the-latest-release), and asset digests are [computed and provided by GitHub](https://github.blog/changelog/2025-06-03-releases-now-expose-digests-for-release-assets/). Network availability and public API quotas can still limit downloads. The local proxy parameter applies to both official metadata and asset requests.
+
+## Application language and v0.4.0 acceptance
+
+v0.4.0 uses GPUI Kit 0.7.3 and provides zh-CN, en-US, ja-JP, ko-KR, de-DE, fr-FR, es-ES and pt-BR. The default Follow system preference resolves Windows UI-language preferences, with English fallback; Settings → Interface language switches immediately and saves the choice. Switching languages preserves raw names, paths, PID/creation identities, current search, stable selection and column widths. Cached feedback and hardware presentation are translated again without repeating the hardware query. CSV headers stay English; missing optional fields stay empty. Full regional formatting and accessibility remain roadmap work.
+
+The script selects the latest published stable release unless you specify a version. The v0.4.0 examples require that version to be published; the script never assumes an unpublished tag or guesses release status. The application's saved language preference controls its UI only. The MSI's own product and installation-condition text is English. Windows Installer system messages, UAC and native OS dialogs use Windows' own language settings.
+
+<!-- V0.4_INSTALL_ACCEPTANCE: update only after the actual public-artifact installation result. -->
+**v0.4.0 status:** 187 source tests passed (131 library + 56 GUI source tests), 2 ignored. Native Windows/D3D11 QA passed **34/34 checks**, with **8 Settings language switches and 40 screenshots at 1040×640 logical pixels, 1.5× scale**. Manual review covered Processes and Settings in all eight languages (**16/40 screenshots**); the remaining 24 were covered by automated native checks. Public MSI/ZIP and installation/upgrade acceptance remain **pending**. Historical public v0.3.0 passed PS5.1 installation and payload/shortcut/portable checks; this does not prove a v0.4.0 installation. See the [roadmap](../ROADMAP.md) and [application guide](../README.md).
 
 ## Validate the script
 

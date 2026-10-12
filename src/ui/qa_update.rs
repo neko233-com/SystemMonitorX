@@ -92,7 +92,7 @@ pub fn start(
             cx.update(|cx| -> Result<()> {
                 handle.update(cx, |_, window, _| { window.resize(size(px(1380.), px(1000.)));
                 })?;
-                click_control(handle, "nav-设置", false, cx)?;
+                click_control(handle, "nav-settings", false, cx)?;
                 ensure!(view.read(cx).page == Page::Settings, "settings navigation failed");
                 Ok(())
             })?;
@@ -193,7 +193,7 @@ pub fn start(
                 let error = cx.update(|cx| {
                     let app = view.read(cx);
                     (!app.operation_busy).then(|| app.message.clone()).flatten()
-                        .filter(|message| message.starts_with("启动安装器失败"))
+                        .map(|message| message.render()).filter(|message| message.starts_with(super::trs("启动安装器失败：{error:#}").split("%{").next().unwrap_or_default()))
                 });
                 if let Some(error) = error { bail!("{error}"); }
                 ensure!(Instant::now() < handoff_deadline, "normal installer handoff did not quit the application");

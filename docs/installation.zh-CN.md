@@ -27,7 +27,7 @@ Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/neko2
 & ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/neko233-com/SystemMonitorX/main/scripts/Install-SystemMonitorX.ps1'))) -Mirror Auto
 ~~~
 
-参数放在最后，例如追加 `-Version v0.3.0` 指定版本，或 `-DownloadOnly` 只下载。追加 `-SelfTest` 仅运行离线脚本测试，不查询发布元数据、不下载包、不安装。需要先检查脚本内容时，使用上方保存并阅读后执行的方式。
+参数放在最后，例如追加 `-Version v0.4.0` 指定版本，或 `-DownloadOnly` 只下载。追加 `-SelfTest` 仅运行离线脚本测试，不查询发布元数据、不下载包、不安装。需要先检查脚本内容时，使用上方保存并阅读后执行的方式。
 
 保存为 `.ps1` 文件后的执行遵循当前 PowerShell 执行策略。脚本不会更改执行策略、系统代理、防火墙、证书信任或全局 TLS 配置。企业管理的电脑应按管理员允许的方式运行脚本。
 
@@ -43,7 +43,7 @@ Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/neko2
 
 | 参数 | 行为 |
 | --- | --- |
-| `-Version 0.3.0` 或 `-Version v0.3.0` | 从官方 API 指定稳定版本；省略时使用 GitHub latest 稳定版 |
+| `-Version 0.4.0` 或 `-Version v0.4.0` | 从官方 API 指定稳定版本；省略时使用 GitHub latest 稳定版 |
 | `-InstallDirectory 'D:\Apps\SystemMonitorX'` | 指定新 MSI 安装目录；已有 MSI 安装使用原目录，改变目录需先卸载 |
 | `-Reinstall` | 对已经安装的同版本重新运行 MSI；不允许降低已装版本 |
 | `-Portable` | 选择便携 ZIP，解压到新目录，不创建 MSI 卸载信息或开始菜单 |
@@ -66,7 +66,7 @@ Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/neko2
 只下载指定版本的便携 ZIP：
 
 ~~~powershell
-& '.\Install-SystemMonitorX.ps1' -Version v0.3.0 -Portable -DownloadOnly -Mirror None
+& '.\Install-SystemMonitorX.ps1' -Version v0.4.0 -Portable -DownloadOnly -Mirror None
 ~~~
 
 将便携版放入一个新目录：
@@ -105,6 +105,15 @@ MSI 日志保留在本轮私有临时目录的 `install.log`，结束时会输�
 SHA-256 证明下载字节与官方发布资产一致，不能替代发布者的代码签名或对项目本身的信任。当 API 返回 HTTP 403/429 限流时，脚本会使用官方 releases/latest 的 HEAD 重定向验证最新稳定标签地址，再读取该版本的官方 SHA256SUMS.txt（最多 16 KiB）和官方资产 HEAD 的体积。备用路径仅确认当前最新稳定版；指定其它旧版时会等待 API 恢复，不会猜测其发布状态。任何官方路径均无法可靠提供版本与校验值时，脚本停止；不会转而信任镜像的元数据。
 
 GitHub 官方公开资源 API 可以[无需令牌访问](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)，资产摘要由 [GitHub 计算并提供](https://github.blog/changelog/2025-06-03-releases-now-expose-digests-for-release-assets/)。公共 API 的网络可达性和额度仍可能限制下载；本机代理参数也同时用于官方元数据和资产请求。
+
+## 界面语言与 v0.4.0 验收
+
+v0.4.0 使用 GPUI Kit 0.7.3，支持 zh-CN、en-US、ja-JP、ko-KR、de-DE、fr-FR、es-ES、pt-BR。默认跟随 Windows 界面语言偏好，无法匹配时回退英文；设置 → 界面语言可即时切换并保存。切换时保留原始名称、路径、PID/创建身份、当前查询、精确选择和列宽；缓存反馈与硬件展示可重新翻译，不重复查询硬件。CSV 表头固定英文，可选字段缺失时留空。完整地区格式和可访问性仍在路线图中。
+
+未指定版本时脚本选择实际已发布的最新稳定版。本文 v0.4.0 示例须等该版本实际发布后使用，脚本不会假定未发布标签或猜测发布状态。应用保存的语言设置只控制应用界面。MSI 自有产品与安装条件文案使用英文；Windows Installer 系统消息、UAC 和原生系统对话框遵从 Windows 自身语言设置。
+
+<!-- V0.4_INSTALL_ACCEPTANCE: 仅在实际公开产物安装结果完成后更新。 -->
+**v0.4.0 当前状态：**源码测试 187 项通过（库 131 + GUI 源码回归 56），2 项默认忽略。真实 Windows/D3D11 原生 QA **34/34 项通过**，完成 **8 次设置语言切换与 40 张截图（1040×640 逻辑像素、1.5× 缩放）**。人工复核覆盖八语言的进程页和设置页（**16/40 张截图**），其余 24 张由自动原生检查覆盖。公开 MSI/ZIP 与安装升级验收仍**待完成**。历史公开 v0.3.0 已通过 PS5.1 安装、文件/快捷方式与便携核验，不代表 v0.4.0 已安装成功。详见[路线图](../ROADMAP.zh-CN.md)和[应用说明](../README.zh-CN.md)。
 
 ## 验证脚本
 

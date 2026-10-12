@@ -4,6 +4,7 @@
 use std::{ffi::c_void, mem::size_of, path::PathBuf, process::Command};
 
 use anyhow::{Context, Result, bail, ensure};
+use sha2::{Digest, Sha256};
 use windows::Win32::System::{
     Diagnostics::ToolHelp as toolhelp, Registry as registry, RemoteDesktop as wts, Services as scm,
     SystemInformation::GetSystemTimeAsFileTime, Threading as threading,
@@ -48,11 +49,50 @@ use windows::{
     core::{BOOL, GUID, PCWSTR, PWSTR},
 };
 
+/// Raw SCM state, independent of presentation language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceState {
+    Stopped,
+    StartPending,
+    StopPending,
+    Running,
+    ContinuePending,
+    PausePending,
+    Paused,
+    Unknown(u32),
+}
+
+impl ServiceState {
+    pub fn from_raw(code: u32) -> Self {
+        match scm::SERVICE_STATUS_CURRENT_STATE(code) {
+            SERVICE_STOPPED => Self::Stopped,
+            SERVICE_START_PENDING => Self::StartPending,
+            SERVICE_STOP_PENDING => Self::StopPending,
+            SERVICE_RUNNING => Self::Running,
+            SERVICE_CONTINUE_PENDING => Self::ContinuePending,
+            SERVICE_PAUSE_PENDING => Self::PausePending,
+            SERVICE_PAUSED => Self::Paused,
+            _ => Self::Unknown(code),
+        }
+    }
+
+    /// A presentation hint only; control_service checks live state and access.
+    pub fn allows_action(self, action: ServiceAction) -> bool {
+        match action {
+            ServiceAction::Start => self == Self::Stopped,
+            ServiceAction::Stop | ServiceAction::Restart => {
+                matches!(self, Self::Running | Self::Paused)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ServiceInfo {
     pub name: String,
     pub display_name: String,
     pub status: String,
+    pub state: ServiceState,
     pub pid: u32,
     pub start_type: String,
     pub configuration: Option<ServiceConfiguration>,
@@ -73,6 +113,83 @@ pub struct StartupEntry {
     pub source: String,
     pub enabled: Option<bool>,
     pub identity: StartupIdentity,
+}
+
+/// Source category captured from the original registry/folder identity.
+/// These values, rather than translated source labels, identify an origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StartupSource {
+    Registry { machine: bool, view32: bool },
+    Folder { machine: bool },
+}
+
+impl StartupEntry {
+    pub fn source_kind(&self) -> StartupSource {
+        match &self.identity.origin {
+            StartupOrigin::Registry {
+                machine, view32, ..
+            } => StartupSource::Registry {
+                machine: *machine,
+                view32: *view32,
+            },
+            StartupOrigin::Folder { machine, .. } => StartupSource::Folder { machine: *machine },
+        }
+    }
+
+    /// Opaque selection key from the captured mutation target, not UI labels.
+    /// Approval/enabled state is omitted so toggling an entry preserves its key.
+    pub fn selection_key(&self) -> String {
+        use std::os::windows::ffi::OsStrExt;
+
+        fn field(hasher: &mut Sha256, value: &[u8]) {
+            hasher.update((value.len() as u64).to_le_bytes());
+            hasher.update(value);
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"SystemMonitorX.StartupIdentity.v1\0");
+        field(&mut hasher, self.identity.name.as_bytes());
+        field(&mut hasher, self.name.as_bytes());
+        field(&mut hasher, self.command.as_bytes());
+        match &self.identity.origin {
+            StartupOrigin::Registry {
+                machine,
+                view32,
+                key,
+                approval_key,
+                kind,
+                bytes,
+            } => {
+                field(&mut hasher, b"registry");
+                field(&mut hasher, &[u8::from(*machine), u8::from(*view32)]);
+                field(&mut hasher, key.as_bytes());
+                field(&mut hasher, approval_key.as_bytes());
+                field(&mut hasher, &kind.to_le_bytes());
+                field(&mut hasher, bytes);
+            }
+            StartupOrigin::Folder {
+                path,
+                machine,
+                size,
+                modified,
+                created,
+            } => {
+                field(&mut hasher, b"folder");
+                field(&mut hasher, &[u8::from(*machine)]);
+                // Preserve the full Windows path, including non-UTF-8 names.
+                let path_bytes: Vec<u8> = path
+                    .as_os_str()
+                    .encode_wide()
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
+                field(&mut hasher, &path_bytes);
+                field(&mut hasher, &size.to_le_bytes());
+                field(&mut hasher, &modified.to_le_bytes());
+                field(&mut hasher, &created.to_le_bytes());
+            }
+        }
+        format!("startup-v1:{:x}", hasher.finalize())
+    }
 }
 
 /// Opaque identity captured while enumerating an entry. It cannot be forged by
@@ -209,6 +326,7 @@ pub fn list_services() -> Result<Vec<ServiceInfo>> {
             let name = unsafe { entry.lpServiceName.to_string() }.context("无法读取服务名称")?;
             let display_name =
                 unsafe { entry.lpDisplayName.to_string() }.context("无法读取服务显示名称")?;
+            let state = ServiceState::from_raw(entry.ServiceStatusProcess.dwCurrentState.0);
             let status = match entry.ServiceStatusProcess.dwCurrentState {
                 SERVICE_RUNNING => "运行中",
                 SERVICE_STOPPED => "已停止",
@@ -230,6 +348,7 @@ pub fn list_services() -> Result<Vec<ServiceInfo>> {
                 name,
                 display_name,
                 status,
+                state,
                 pid: entry.ServiceStatusProcess.dwProcessId,
                 start_type,
                 configuration,
@@ -1521,6 +1640,7 @@ mod tests {
             name: "Owned fixture".to_owned(),
             display_name: String::new(),
             status: String::new(),
+            state: ServiceState::Unknown(0),
             pid: 0,
             start_type: String::new(),
             configuration: None,
@@ -1533,5 +1653,206 @@ mod tests {
             service_type: SERVICE_DRIVER.0,
         });
         assert!(control_service(&service, ServiceAction::Start).is_err());
+    }
+
+    #[test]
+    fn scm_raw_states_and_action_hints_ignore_presentation_text() {
+        for (raw, state) in [
+            (SERVICE_STOPPED, ServiceState::Stopped),
+            (SERVICE_START_PENDING, ServiceState::StartPending),
+            (SERVICE_STOP_PENDING, ServiceState::StopPending),
+            (SERVICE_RUNNING, ServiceState::Running),
+            (SERVICE_CONTINUE_PENDING, ServiceState::ContinuePending),
+            (SERVICE_PAUSE_PENDING, ServiceState::PausePending),
+            (SERVICE_PAUSED, ServiceState::Paused),
+        ] {
+            assert_eq!(ServiceState::from_raw(raw.0), state);
+            assert_eq!(
+                state.allows_action(ServiceAction::Start),
+                state == ServiceState::Stopped,
+            );
+            assert_eq!(
+                state.allows_action(ServiceAction::Stop),
+                matches!(state, ServiceState::Running | ServiceState::Paused),
+            );
+            assert_eq!(
+                state.allows_action(ServiceAction::Restart),
+                matches!(state, ServiceState::Running | ServiceState::Paused),
+            );
+        }
+        assert_eq!(
+            ServiceState::from_raw(u32::MAX),
+            ServiceState::Unknown(u32::MAX)
+        );
+        for state in [ServiceState::Unknown(0), ServiceState::Unknown(u32::MAX)] {
+            for action in [
+                ServiceAction::Start,
+                ServiceAction::Stop,
+                ServiceAction::Restart,
+            ] {
+                assert!(!state.allows_action(action));
+            }
+        }
+        let mut service = ServiceInfo {
+            name: "Model-only service".into(),
+            display_name: "Model-only service".into(),
+            status: "运行中".into(),
+            state: ServiceState::Stopped,
+            pid: 0,
+            start_type: "手动".into(),
+            configuration: None,
+        };
+        for label in [
+            "已停止",
+            "Stopped",
+            "停止",
+            "중지됨",
+            "Beendet",
+            "Arrêté",
+            "Detenido",
+            "Parado",
+            "运行中",
+        ] {
+            service.status = label.into();
+            assert!(service.state.allows_action(ServiceAction::Start));
+            assert!(!service.state.allows_action(ServiceAction::Stop));
+        }
+    }
+
+    fn model_registry_startup() -> StartupEntry {
+        StartupEntry {
+            name: "Owned model".into(),
+            command: "\"C:\\model only\\fixture.exe\" --same".into(),
+            source: "HKCU · Run".into(),
+            enabled: Some(true),
+            identity: StartupIdentity {
+                name: "Owned model".into(),
+                approval: ApprovalSnapshot::Absent,
+                origin: StartupOrigin::Registry {
+                    machine: false,
+                    view32: false,
+                    key: "Software\\model only\\Run".into(),
+                    approval_key: "Software\\model only\\Approval".into(),
+                    kind: REG_SZ.0,
+                    bytes: vec![1, 2, 3, 4],
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn startup_selection_key_keeps_labels_and_approval_out_of_identity() {
+        let mut entry = model_registry_startup();
+        let key = entry.selection_key();
+        assert_eq!(key.len(), "startup-v1:".len() + 64);
+        assert_eq!(
+            entry.source_kind(),
+            StartupSource::Registry {
+                machine: false,
+                view32: false
+            },
+        );
+        for label in [
+            "当前用户启动文件夹",
+            "Current user",
+            "現在のユーザー",
+            "사용자",
+            "Benutzer",
+            "Utilisateur",
+            "Usuario",
+            "Usuário",
+        ] {
+            entry.source = label.into();
+            entry.enabled = Some(false);
+            entry.identity.approval = ApprovalSnapshot::Binary(vec![3; 12]);
+            assert_eq!(entry.selection_key(), key);
+        }
+        entry.enabled = None;
+        entry.identity.approval = ApprovalSnapshot::Unreadable;
+        assert_eq!(entry.selection_key(), key);
+    }
+
+    #[test]
+    fn startup_registry_keys_distinguish_hive_view_and_changed_raw_value() {
+        let original = model_registry_startup();
+        let baseline = original.selection_key();
+        for variant in 0..6 {
+            let mut changed = original.clone();
+            if let StartupOrigin::Registry {
+                machine,
+                view32,
+                key,
+                approval_key,
+                kind,
+                bytes,
+            } = &mut changed.identity.origin
+            {
+                match variant {
+                    0 => *machine = true,
+                    1 => *view32 = true,
+                    2 => key.push_str("\\changed"),
+                    3 => approval_key.push_str("\\changed"),
+                    4 => *kind = REG_EXPAND_SZ.0,
+                    _ => bytes.push(0),
+                }
+            }
+            // The visible name/command/source can all remain identical.
+            assert_ne!(changed.selection_key(), baseline);
+        }
+        let mut first = original.clone();
+        first.name = "a|b".into();
+        first.identity.name = first.name.clone();
+        first.command = "c".into();
+        let mut second = original;
+        second.name = "a".into();
+        second.identity.name = second.name.clone();
+        second.command = "b|c".into();
+        assert_ne!(first.selection_key(), second.selection_key());
+    }
+
+    #[test]
+    fn startup_folder_keys_keep_exact_ticks_and_lossless_windows_path() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let mut entry = model_registry_startup();
+        entry.identity.origin = StartupOrigin::Folder {
+            path: PathBuf::from("C:\\model only\\启动.lnk"),
+            machine: false,
+            size: 100,
+            modified: 200,
+            created: 300,
+        };
+        let baseline = entry.selection_key();
+        assert_eq!(
+            entry.source_kind(),
+            StartupSource::Folder { machine: false }
+        );
+        for variant in 0..4 {
+            let mut changed = entry.clone();
+            if let StartupOrigin::Folder {
+                machine,
+                size,
+                modified,
+                created,
+                ..
+            } = &mut changed.identity.origin
+            {
+                match variant {
+                    0 => *machine = true,
+                    1 => *size += 1,
+                    2 => *modified += 1,
+                    _ => *created += 1,
+                }
+            }
+            assert_ne!(changed.selection_key(), baseline);
+        }
+        let mut other = entry.clone();
+        if let StartupOrigin::Folder { path, .. } = &mut entry.identity.origin {
+            *path = PathBuf::from(std::ffi::OsString::from_wide(&[0xD800]));
+        }
+        if let StartupOrigin::Folder { path, .. } = &mut other.identity.origin {
+            *path = PathBuf::from(std::ffi::OsString::from_wide(&[0xD801]));
+        }
+        assert_ne!(entry.selection_key(), other.selection_key());
     }
 }

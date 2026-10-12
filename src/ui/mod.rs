@@ -2,12 +2,15 @@ mod columns;
 mod developer_actions;
 mod directx;
 mod hardware;
+mod localization;
 mod management;
 mod ports;
 mod process_details;
 mod process_icons;
 #[cfg(feature = "ui-test")]
 mod qa;
+#[cfg(feature = "ui-test")]
+mod qa_locales;
 #[cfg(feature = "ui-test")]
 mod qa_performance;
 #[cfg(feature = "ui-test")]
@@ -25,6 +28,7 @@ use gpui_kit::component::{
     *,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use localization::{UiMessage, diagnostic, mf, mlf, msg, network_diagnostic, tf, tr, trs};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -36,8 +40,9 @@ use std::{
     },
     time::Duration,
 };
+use system_monitor_x::i18n::Language;
 use system_monitor_x::{
-    export::write_process_csv,
+    export::{write_process_csv, write_process_csv_rows},
     monitor::{Monitor, SystemSnapshot},
     platform::{self, Priority},
     process_details::ProcessDetails,
@@ -64,7 +69,7 @@ enum Page {
     Settings,
 }
 impl Page {
-    fn title(self) -> &'static str {
+    fn source_title(self) -> &'static str {
         match self {
             Self::Processes => "进程",
             Self::Details => "详细信息",
@@ -76,6 +81,33 @@ impl Page {
             Self::Services => "服务",
             Self::Startup => "启动应用",
             Self::Settings => "设置",
+        }
+    }
+    fn title(self) -> SharedString {
+        tr(self.source_title())
+    }
+    fn search_source(self) -> &'static str {
+        match self {
+            Self::Ports => "搜索端口、协议、进程名称或 PID",
+            Self::Services => "搜索服务名称、状态或 PID",
+            Self::Startup => "搜索启动项名称、命令或来源",
+            Self::Users => "搜索用户、会话 ID 或状态",
+            Self::History => "搜索应用名称或路径",
+            _ => "搜索进程名称、路径或 PID",
+        }
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Self::Processes => "nav-processes",
+            Self::Details => "nav-details",
+            Self::Ports => "nav-ports",
+            Self::Performance => "nav-performance",
+            Self::History => "nav-history",
+            Self::Users => "nav-users",
+            Self::Devices => "nav-devices",
+            Self::Services => "nav-services",
+            Self::Startup => "nav-startup",
+            Self::Settings => "nav-settings",
         }
     }
     fn icon(self) -> UiIcon {
@@ -103,6 +135,7 @@ struct Settings {
     always_on_top: bool,
     hidden_process_columns: Vec<usize>,
     group_processes: bool,
+    language: Language,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -113,11 +146,19 @@ impl Default for Settings {
             always_on_top: false,
             hidden_process_columns: Vec::new(),
             group_processes: true,
+            language: Language::System,
         }
     }
 }
 impl Settings {
     fn path() -> PathBuf {
+        #[cfg(feature = "ui-test")]
+        if let Some(directory) = std::env::args()
+            .skip_while(|arg| arg != "--ui-smoke-dir")
+            .nth(1)
+        {
+            return PathBuf::from(directory).join("settings.json");
+        }
         PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_else(|| ".".into()))
             .join("SystemMonitorX/settings.json")
     }
@@ -172,6 +213,7 @@ pub struct SystemMonitorApp {
     interval: Arc<AtomicU64>,
     paused: bool,
     settings: Settings,
+    resolved_language: Language,
     search: Entity<InputState>,
     task_input: Entity<InputState>,
     processes: Entity<TableState<ProcessTable>>,
@@ -187,7 +229,7 @@ pub struct SystemMonitorApp {
     startup_entries: Vec<platform::StartupEntry>,
     history: VecDeque<HistoryPoint>,
     sample_index: u64,
-    message: Option<String>,
+    message: Option<UiMessage>,
     elevated: bool,
     metadata_loading: bool,
     updater: UpdateService,
@@ -197,6 +239,7 @@ pub struct SystemMonitorApp {
     install_after_download: bool,
     hardware: Option<Arc<system_monitor_x::hardware::HardwareInventory>>,
     hardware_sections: Vec<hardware::HardwareSection>,
+    hardware_display_generation: u64,
     hardware_loading: bool,
     hardware_error: Option<String>,
     directx_inventory: Option<Arc<system_monitor_x::directx::DirectXInventory>>,
@@ -204,19 +247,19 @@ pub struct SystemMonitorApp {
     directx_error: Option<String>,
     process_details: Option<Arc<ProcessDetails>>,
     process_details_loading: bool,
-    process_details_error: Option<String>,
+    process_details_error: Option<UiMessage>,
     process_details_identity: Option<(u32, u64)>,
     process_details_expanded: bool,
     process_details_generation: u64,
     file_signature: Option<Arc<system_monitor_x::file_signature::FileSignature>>,
     file_signature_loading: bool,
-    file_signature_error: Option<String>,
+    file_signature_error: Option<UiMessage>,
     file_signature_generation: u64,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _poll: Task<()>,
     settings_writer: std::sync::mpsc::Sender<Settings>,
-    settings_error: Arc<Mutex<Option<String>>>,
+    settings_error: Arc<Mutex<Option<UiMessage>>>,
 }
 impl Drop for SystemMonitorApp {
     fn drop(&mut self) {
@@ -226,6 +269,7 @@ impl Drop for SystemMonitorApp {
 impl SystemMonitorApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = Settings::load();
+        let resolved_language = system_monitor_x::i18n::set_language(settings.language);
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
         Theme::change(
@@ -274,9 +318,10 @@ impl SystemMonitorApp {
             })
             .expect("start collector");
         let search =
-            cx.new(|cx| InputState::new(window, cx).placeholder("搜索进程名称、路径或 PID"));
-        let task_input = cx
-            .new(|cx| InputState::new(window, cx).placeholder("例如 notepad.exe 或可执行文件路径"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr("搜索进程名称、路径或 PID")));
+        let task_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr("例如 notepad.exe 或可执行文件路径"))
+        });
         let process_action_parent = cx.entity().downgrade();
         let processes = cx.new(|cx| {
             let mut delegate = ProcessTable::new();
@@ -300,7 +345,8 @@ impl SystemMonitorApp {
                     ("PID", 80.),
                     ("启动类型", 130.),
                 ])
-                .numeric_columns(&[3]),
+                .numeric_columns(&[3])
+                .localized_columns(&[2, 4]),
                 window,
                 cx,
             )
@@ -315,7 +361,8 @@ impl SystemMonitorApp {
                     ("命令 / 路径", 610.),
                     ("来源", 260.),
                 ])
-                .stable_identity_columns(&[2, 3]),
+                .stable_identity_columns(&[4])
+                .localized_columns(&[1, 3]),
                 window,
                 cx,
             )
@@ -335,11 +382,13 @@ impl SystemMonitorApp {
                     ("客户端 / 协议", 230.),
                 ])
                 .numeric_columns(&[1, 3, 4, 5, 6])
-                .stable_identity_columns(&[1]),
+                .stable_identity_columns(&[1])
+                .localized_columns(&[2]),
                 window,
                 cx,
             )
             .col_selectable(false)
+            .col_movable(false)
         });
         let app_history = cx.new(|cx| {
             TableState::new(
@@ -360,6 +409,7 @@ impl SystemMonitorApp {
                 cx,
             )
             .col_selectable(false)
+            .col_movable(false)
         });
         let ports = cx.new(|cx| {
             TableState::new(ports::PortsTable::new(), window, cx)
@@ -439,6 +489,30 @@ impl SystemMonitorApp {
                 cx.notify();
             }),
         ];
+        let mut subscriptions = subscriptions;
+        for text_table in [&services, &startup, &users, &app_history] {
+            subscriptions.push(
+                cx.subscribe(text_table, |_, table, event: &TableEvent, cx| match event {
+                    TableEvent::SelectRow(row) | TableEvent::DoubleClickedRow(row) => {
+                        if table.read(cx).selected_row() == Some(*row) {
+                            table
+                                .update(cx, |table, _| table.delegate_mut().select_row(Some(*row)));
+                        }
+                    }
+                    TableEvent::ClearSelection => {
+                        if table.read(cx).selected_row().is_none() {
+                            table.update(cx, |table, _| table.delegate_mut().select_row(None));
+                        }
+                    }
+                    TableEvent::ColumnWidthsChanged(widths) => {
+                        table.update(cx, |table, _| {
+                            table.delegate_mut().set_column_widths(widths)
+                        });
+                    }
+                    _ => {}
+                }),
+            );
+        }
         let poll = cx.spawn(async move |view, cx| {
             loop {
                 smol::Timer::after(Duration::from_millis(100)).await;
@@ -462,7 +536,10 @@ impl SystemMonitorApp {
                     if let Err(error) = settings.save()
                         && let Ok(mut slot) = worker_settings_error.lock()
                     {
-                        *slot = Some(format!("设置保存失败：{error}"));
+                        *slot = Some(mf(
+                            "设置保存失败：{error}",
+                            &[("error", format!("{error}"))],
+                        ));
                     }
                 }
             })
@@ -480,6 +557,7 @@ impl SystemMonitorApp {
             interval,
             paused: false,
             settings,
+            resolved_language,
             search,
             task_input,
             processes,
@@ -505,6 +583,7 @@ impl SystemMonitorApp {
             install_after_download: false,
             hardware: None,
             hardware_sections: Vec::new(),
+            hardware_display_generation: 0,
             hardware_loading: false,
             hardware_error: None,
             directx_inventory: None,
@@ -534,7 +613,7 @@ impl SystemMonitorApp {
             let _ = view.update(cx, |this, cx| {
                 match result {
                     Ok(result) => this.last_install_result = result,
-                    Err(error) => this.message = Some(error.to_string()),
+                    Err(error) => this.message = Some(error.to_string().into()),
                 }
                 cx.notify();
             });
@@ -543,7 +622,7 @@ impl SystemMonitorApp {
         if app.settings.always_on_top
             && let Err(error) = Self::apply_topmost(window, true)
         {
-            app.message = Some(error.to_string());
+            app.message = Some(error.to_string().into());
         }
         app
     }
@@ -642,11 +721,6 @@ impl SystemMonitorApp {
         }
         if self.page == Page::Users && self.users_display_seq != Some(seq) {
             self.users.update(cx, |table, cx| {
-                let selected = table
-                    .selected_row()
-                    .and_then(|i| table.delegate().rows.get(i))
-                    .and_then(|r| r.get(1))
-                    .cloned();
                 let d = table.delegate_mut();
                 d.all = snapshot
                     .sessions
@@ -667,21 +741,14 @@ impl SystemMonitorApp {
                             percent(s.gpu_usage),
                             format!(
                                 "{} · {}",
-                                s.client_name.as_deref().unwrap_or("本机"),
-                                s.protocol.as_deref().unwrap_or("—")
+                                s.client_name.clone().unwrap_or_else(|| trs("本机")),
+                                session_protocol(s.protocol.as_deref())
                             ),
                         ]
                     })
                     .collect();
                 d.rebuild();
-                if let Some(id) = selected {
-                    let next = d.rows.iter().position(|r| r[1] == id);
-                    if let Some(next) = next {
-                        table.set_selected_row(next, cx)
-                    } else {
-                        table.clear_selection(cx)
-                    }
-                }
+                tables::sync_text_selection(table, cx);
                 cx.notify();
             });
             self.users_display_seq = Some(seq);
@@ -718,6 +785,7 @@ impl SystemMonitorApp {
                     })
                     .collect();
                 d.rebuild();
+                tables::sync_text_selection(table, cx);
                 cx.notify();
             });
             self.history_display_seq = Some(seq);
@@ -764,6 +832,7 @@ impl SystemMonitorApp {
                 }
                 t.delegate_mut().query = query;
                 t.delegate_mut().rebuild();
+                tables::sync_text_selection(t, cx);
                 t.scroll_to_row(0, cx);
                 cx.notify();
             });
@@ -771,6 +840,9 @@ impl SystemMonitorApp {
     }
     fn set_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
+        self.search.update(cx, |input, cx| {
+            input.set_placeholder(tr(page.search_source()), window, cx)
+        });
         if matches!(page, Page::Processes | Page::Details) {
             self.processes.update(cx, |table, cx| {
                 let detailed = page == Page::Details;
@@ -819,11 +891,13 @@ impl SystemMonitorApp {
                                 })
                                 .collect();
                             t.delegate_mut().rebuild();
-                            t.clear_selection(cx);
+                            tables::sync_text_selection(t, cx);
                             cx.notify();
                         });
                     }
-                    Err(e) => this.message = Some(format!("服务读取失败：{e:#}")),
+                    Err(e) => {
+                        this.message = Some(mf("服务读取失败：{e:#}", &[("e", format!("{e:#}"))]))
+                    }
                 }
                 match results.1 {
                     Ok(rows) => {
@@ -832,22 +906,26 @@ impl SystemMonitorApp {
                             t.delegate_mut().all = rows
                                 .into_iter()
                                 .map(|s| {
+                                    let identity = s.selection_key();
                                     vec![
                                         s.name,
                                         s.enabled
                                             .map(|v| if v { "已启用" } else { "已禁用" }.to_owned())
-                                            .unwrap_or_else(|| "不可用".into()),
+                                            .unwrap_or_else(|| "不可用".to_owned()),
                                         s.command,
                                         s.source,
+                                        identity,
                                     ]
                                 })
                                 .collect();
                             t.delegate_mut().rebuild();
-                            t.clear_selection(cx);
+                            tables::sync_text_selection(t, cx);
                             cx.notify();
                         });
                     }
-                    Err(e) => this.message = Some(format!("启动项读取失败：{e:#}")),
+                    Err(e) => {
+                        this.message = Some(mf("启动项读取失败：{e:#}", &[("e", format!("{e:#}"))]))
+                    }
                 }
                 cx.notify();
             });
@@ -864,16 +942,16 @@ impl SystemMonitorApp {
     fn run_operation(
         &mut self,
         label: &str,
-        operation: impl FnOnce() -> anyhow::Result<String> + Send + 'static,
+        operation: impl FnOnce() -> anyhow::Result<UiMessage> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
         if self.operation_busy {
-            self.message = Some("有一项操作正在执行，请稍候".into());
+            self.message = Some(msg("有一项操作正在执行，请稍候"));
             cx.notify();
             return;
         }
         self.operation_busy = true;
-        self.message = Some(format!("{label}…"));
+        self.message = Some(UiMessage::Progress(label.to_owned()));
         cx.notify();
         cx.spawn(async move |view, cx| {
             let result = smol::unblock(operation).await;
@@ -881,7 +959,7 @@ impl SystemMonitorApp {
                 this.operation_busy = false;
                 this.message = Some(match result {
                     Ok(message) => message,
-                    Err(error) => format!("操作失败：{error:#}"),
+                    Err(error) => mf("操作失败：{error:#}", &[("error", format!("{error:#}"))]),
                 });
                 if matches!(this.page, Page::Services | Page::Startup) {
                     this.refresh_metadata(cx);
@@ -902,7 +980,7 @@ impl SystemMonitorApp {
         };
         let (path, release) = (path.clone(), release.clone());
         self.operation_busy = true;
-        self.message = Some("正在重新校验安装包…".into());
+        self.message = Some(msg("正在重新校验安装包…"));
         cx.spawn(async move |view, cx| {
             let result =
                 smol::unblock(move || system_monitor_x::updater::launch_installer(&path, &release))
@@ -911,7 +989,10 @@ impl SystemMonitorApp {
             let _ = view.update(cx, |this, cx| {
                 this.operation_busy = false;
                 if let Err(error) = result {
-                    this.message = Some(format!("启动安装器失败：{error:#}"));
+                    this.message = Some(mf(
+                        "启动安装器失败：{error:#}",
+                        &[("error", format!("{error:#}"))],
+                    ));
                 }
                 cx.notify();
             });
@@ -927,7 +1008,7 @@ impl SystemMonitorApp {
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
-                .title("运行新任务")
+                .title(tr("运行新任务"))
                 .width(px(480.))
                 .child(Input::new(&input))
                 .footer(
@@ -936,23 +1017,28 @@ impl SystemMonitorApp {
                         .gap_2()
                         .child(
                             Button::new("task-cancel")
-                                .label("取消")
+                                .label(tr("取消"))
                                 .on_click(|_, w, cx| w.close_dialog(cx)),
                         )
-                        .child(Button::new("task-run").primary().label("运行").on_click({
-                            let input = input.clone();
-                            let view = view.clone();
-                            move |_, w, cx| {
-                                if Self::submit_task(&input, &view, cx) {
-                                    w.close_dialog(cx);
-                                }
-                            }
-                        })),
+                        .child(
+                            Button::new("task-run")
+                                .primary()
+                                .label(tr("运行"))
+                                .on_click({
+                                    let input = input.clone();
+                                    let view = view.clone();
+                                    move |_, w, cx| {
+                                        if Self::submit_task(&input, &view, cx) {
+                                            w.close_dialog(cx);
+                                        }
+                                    }
+                                }),
+                        ),
                 )
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("运行")
-                        .cancel_text("取消")
+                        .ok_text(tr("运行"))
+                        .cancel_text(tr("取消"))
                         .show_cancel(true),
                 )
                 .on_ok({
@@ -966,7 +1052,7 @@ impl SystemMonitorApp {
         let command = input.read(cx).value().to_string();
         if command.trim().is_empty() {
             let _ = view.update(cx, |this, cx| {
-                this.message = Some("启动失败：请输入任务命令".into());
+                this.message = Some(msg("启动失败：请输入任务命令"));
                 cx.notify();
             });
             return false;
@@ -976,7 +1062,7 @@ impl SystemMonitorApp {
                 "正在启动任务",
                 move || {
                     platform::launch_task(&command)?;
-                    Ok("任务已启动".into())
+                    Ok(msg("任务已启动"))
                 },
                 cx,
             );
@@ -989,7 +1075,7 @@ impl SystemMonitorApp {
         };
         let delegate = self.processes.read(cx).delegate();
         if let Some(reason) = delegate.selected_application_unavailable_reason() {
-            self.message = Some(reason);
+            self.message = Some(msg(&reason));
             cx.notify();
             return;
         }
@@ -997,11 +1083,11 @@ impl SystemMonitorApp {
             let count = targets.len();
             self.confirm_management(
                 "结束应用",
-                format!("结束 {} 的 {count} 个已列出进程？未保存的数据可能丢失。确认期间新建的进程不在本次范围内。", p.name),
+                tf("结束 {} 的 {count} 个已列出进程？未保存的数据可能丢失。确认期间新建的进程不在本次范围内。", &[("arg0", p.name.to_string()), ("count", format!("{count}"))]),
                 true,
                 move || {
                     let ended = platform::terminate_application_processes(&targets)?;
-                    Ok(format!("已结束应用的 {} 个进程", ended.len()))
+                    Ok(mf("已结束应用的 {} 个进程", &[("arg0", format!("{}", ended.len()))]))
                 },
                 w,
                 cx,
@@ -1012,15 +1098,15 @@ impl SystemMonitorApp {
         w.open_alert_dialog(cx, move |dialog, _, _| {
             dialog
                 .confirm()
-                .title("结束进程")
-                .description(format!(
+                .title(tr("结束进程"))
+                .description(tf(
                     "结束 {}（PID {}）？未保存的数据可能丢失。",
-                    p.name, p.pid
+                    &[("arg0", p.name.to_string()), ("arg1", format!("{}", p.pid))],
                 ))
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("结束进程")
-                        .cancel_text("取消")
+                        .ok_text(tr("结束进程"))
+                        .cancel_text(tr("取消"))
                         .show_cancel(true)
                         .ok_variant(ButtonVariant::Danger),
                 )
@@ -1035,7 +1121,7 @@ impl SystemMonitorApp {
                                         p.pid,
                                         p.start_time_windows_ticks.unwrap_or(0),
                                     )?;
-                                    Ok("进程已结束".into())
+                                    Ok(msg("进程已结束"))
                                 },
                                 cx,
                             );
@@ -1050,20 +1136,33 @@ impl SystemMonitorApp {
             self.export_ports(cx);
             return;
         }
-        let Some(snapshot) = self.snapshot.clone() else {
+        let selected = if matches!(self.page, Page::Processes | Page::Details) {
+            self.processes.read(cx).delegate().export_snapshot()
+        } else {
+            self.snapshot.clone().map(|snapshot| (snapshot, Vec::new()))
+        };
+        let Some((snapshot, indices)) = selected else {
             return;
         };
+        let filtered = matches!(self.page, Page::Processes | Page::Details);
         let directory =
             PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_else(|| ".".into()));
         let prompt = cx.prompt_for_new_path(&directory, Some("SystemMonitorX-processes.csv"));
         cx.spawn(async move |view, cx| {
             if let Ok(Ok(Some(path))) = prompt.await {
-                let result =
-                    smol::unblock(move || write_process_csv(&snapshot, &path).map(|_| path)).await;
+                let result = smol::unblock(move || {
+                    if filtered {
+                        write_process_csv_rows(&snapshot, &indices, &path)?;
+                    } else {
+                        write_process_csv(&snapshot, &path)?;
+                    }
+                    Ok::<PathBuf, anyhow::Error>(path)
+                })
+                .await;
                 let _ = view.update(cx, |this, cx| {
                     this.message = Some(match result {
-                        Ok(path) => format!("已导出 {}", path.display()),
-                        Err(e) => format!("导出失败：{e:#}"),
+                        Ok(path) => mf("已导出 {}", &[("arg0", format!("{}", path.display()))]),
+                        Err(e) => mf("导出失败：{e:#}", &[("e", format!("{e:#}"))]),
                     });
                     cx.notify();
                 });
@@ -1112,11 +1211,12 @@ impl SystemMonitorApp {
                     .pb_2()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("系统"),
+                    .child(tr("系统")),
             )
             .child(
                 v_flex()
                     .id("sidebar-nav")
+                    .test_support()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -1139,25 +1239,36 @@ impl SystemMonitorApp {
             .child(self.nav_item(Page::Settings, cx))
             .child(
                 v_flex()
+                    .id("sidebar-footer")
+                    .test_support()
+                    .flex_shrink_0()
                     .p_5()
                     .gap_2()
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .child(
                         h_flex()
+                            .min_w_0()
                             .gap_2()
-                            .child(Icon::new(UiIcon::Shield).size(px(14.)))
-                            .child(if self.elevated {
-                                "管理员权限"
-                            } else {
-                                "标准用户权限"
-                            }),
+                            .child(Icon::new(UiIcon::Shield).size(px(14.)).flex_shrink_0())
+                            .child(
+                                div()
+                                    .id("sidebar-permission")
+                                    .test_support()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(tr(if self.elevated {
+                                        "管理员权限"
+                                    } else {
+                                        "标准用户权限"
+                                    })),
+                            ),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Rust · GPUI Kit 0.7.1"),
+                            .child("Rust · GPUI Kit 0.7.3"),
                     ),
             )
             .into_any_element()
@@ -1165,11 +1276,12 @@ impl SystemMonitorApp {
     fn nav_item(&self, page: Page, cx: &mut Context<Self>) -> AnyElement {
         let active = self.page == page;
         div()
-            .id(format!("nav-{}", page.title()))
+            .id(page.id())
             .mx_2()
             .my_1()
             .px_4()
-            .h(px(42.))
+            .min_h(px(42.))
+            .py_2()
             .flex()
             .items_center()
             .gap_3()
@@ -1188,7 +1300,7 @@ impl SystemMonitorApp {
             .hover(|s| s.bg(cx.theme().secondary))
             .on_click(cx.listener(move |this, _, w, cx| this.set_page(page, w, cx)))
             .child(Icon::new(page.icon()).size(px(18.)))
-            .child(page.title())
+            .child(div().flex_1().min_w_0().child(page.title()))
             .test_support()
             .into_any_element()
     }
@@ -1242,14 +1354,14 @@ impl SystemMonitorApp {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(Icon::new(icon).size(px(14.)))
-                                    .child(name),
+                                    .child(tr(name)),
                             )
                             .child(div().font_family("Consolas").text_2xl().child(value))
                     }),
             )
             .into_any_element()
     }
-    fn process_view(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn process_view(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let table = self.processes.read(cx).delegate();
         let p = table.selection().cloned();
         v_flex()
@@ -1257,6 +1369,9 @@ impl SystemMonitorApp {
             .min_h_0()
             .child(
                 h_flex()
+                    .id("process-actions")
+                    .test_support()
+                    .flex_shrink_0()
                     .min_h(px(50.))
                     .py_2()
                     .flex_wrap()
@@ -1265,26 +1380,38 @@ impl SystemMonitorApp {
                     .justify_between()
                     .child(
                         div()
+                            .flex_shrink_0()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!(
+                            .child(tf(
                                 "{} 个进程 · {} 行",
-                                self.snapshot
-                                    .as_ref()
-                                    .map(|s| s.processes.len())
-                                    .unwrap_or(table.rows.len()),
-                                table.rows.len()
+                                &[
+                                    (
+                                        "arg0",
+                                        format!(
+                                            "{}",
+                                            self.snapshot
+                                                .as_ref()
+                                                .map(|s| s.processes.len())
+                                                .unwrap_or(table.rows.len())
+                                        ),
+                                    ),
+                                    ("arg1", format!("{}", table.rows.len())),
+                                ],
                             )),
                     )
                     .child(
                         h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .justify_end()
                             .gap_2()
                             .flex_wrap()
                             .child(
                                 Button::new("process-columns")
                                     .ghost()
                                     .small()
-                                    .label("选择列")
+                                    .label(tr("选择列"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.columns_dialog(window, cx)
                                     })),
@@ -1293,7 +1420,7 @@ impl SystemMonitorApp {
                                 Button::new("application-groups")
                                     .ghost()
                                     .small()
-                                    .label(
+                                    .label(tr(
                                         if self.processes.read(cx).delegate().group_mode
                                             && !self.processes.read(cx).delegate().tree_mode
                                         {
@@ -1301,7 +1428,7 @@ impl SystemMonitorApp {
                                         } else {
                                             "应用分组"
                                         },
-                                    )
+                                    ))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let enabled = this.processes.update(cx, |table, cx| {
                                             let delegate = table.delegate_mut();
@@ -1323,11 +1450,11 @@ impl SystemMonitorApp {
                                 Button::new("tree-mode")
                                     .ghost()
                                     .small()
-                                    .label(if table.tree_mode {
+                                    .label(tr(if table.tree_mode {
                                         "退出进程树"
                                     } else {
                                         "进程树"
-                                    })
+                                    }))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.processes.update(cx, |table, cx| {
                                             let d = table.delegate_mut();
@@ -1344,7 +1471,7 @@ impl SystemMonitorApp {
                                     .ghost()
                                     .small()
                                     .icon(UiIcon::Download)
-                                    .label("导出 CSV")
+                                    .label(tr("导出 CSV"))
                                     .on_click(cx.listener(|this, _, w, cx| {
                                         this.export_csv(&ExportCsv, w, cx)
                                     })),
@@ -1354,62 +1481,73 @@ impl SystemMonitorApp {
                                     .small()
                                     .danger()
                                     .icon(UiIcon::Square)
-                                    .label("结束任务")
+                                    .label(tr("结束任务"))
                                     .disabled(p.is_none())
                                     .on_click(cx.listener(|this, _, w, cx| this.end_task(w, cx))),
                             ),
                     ),
             )
-            .when_some(
-                self.snapshot.as_ref().and_then(|s| s.gpu_note.clone()),
-                |e, note| {
-                    e.child(
-                        div()
-                            .px_6()
-                            .py_2()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(note),
+            .when_some(self.snapshot.as_ref(), |element, snapshot| {
+                let notes: Vec<_> = snapshot
+                    .gpu_note
+                    .iter()
+                    .map(|note| diagnostic(note))
+                    .chain(
+                        (!snapshot.process_network_available)
+                            .then(|| network_diagnostic(&snapshot.process_network_status)),
                     )
-                },
-            )
-            .when_some(
-                self.snapshot
-                    .as_ref()
-                    .filter(|s| !s.process_network_available)
-                    .map(|s| s.process_network_status.clone()),
-                |e, note| {
-                    e.child(
-                        div()
+                    .collect();
+                element.when(!notes.is_empty(), |element| {
+                    element.child(
+                        v_flex()
+                            .id("process-diagnostics-scroll")
+                            .test_support()
+                            .flex_shrink_0()
+                            .max_h(px(64.))
+                            .overflow_y_scroll()
                             .px_6()
                             .py_1()
+                            .gap_1()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(note),
+                            .children(notes.into_iter().map(|note| div().child(note))),
                     )
-                },
-            )
+                })
+            })
             .child(
-                div().flex_1().min_h_0().child(
-                    DataTable::new(&self.processes)
-                        .bordered(false)
-                        .stripe(false)
-                        .small(),
-                ),
+                div()
+                    .id("process-table-region")
+                    .test_support()
+                    .flex_1()
+                    .min_h(px(120.))
+                    .child(
+                        DataTable::new(&self.processes)
+                            .bordered(false)
+                            .stripe(false)
+                            .small(),
+                    ),
             )
-            .when_some(p, |e, p| e.child(self.process_inspector(p, cx)))
+            .when_some(p, |e, p| {
+                e.child(self.process_inspector(
+                    p,
+                    px((window.viewport_size().height.as_f32() * 0.25).clamp(120., 300.)),
+                    cx,
+                ))
+            })
             .into_any_element()
     }
     fn process_inspector(
         &self,
         p: system_monitor_x::monitor::ProcessSample,
+        maximum_height: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let path = p.exe.as_ref().map(|p| p.to_string_lossy().to_string());
         v_flex()
             .flex_shrink_0()
             .id("process-inspector-scroll")
-            .max_h(px(300.))
+            .test_support()
+            .max_h(maximum_height)
             .overflow_y_scroll()
             .p_4()
             .gap_2()
@@ -1428,22 +1566,30 @@ impl SystemMonitorApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(p.name.clone()),
                             )
-                            .child(div().text_color(cx.theme().muted_foreground).child(format!(
-                                "PID {} · 已运行 {}",
-                                p.pid,
-                                if p.start_time_unix_secs > 0 {
-                                    duration(p.run_time_secs)
-                                } else {
-                                    "不可用".into()
-                                }
-                            ))),
+                            .child(
+                                div().text_color(cx.theme().muted_foreground).child(tf(
+                                    "PID {} · 已运行 {}",
+                                    &[
+                                        ("arg0", format!("{}", p.pid)),
+                                        (
+                                            "arg1",
+                                            (if p.start_time_unix_secs > 0 {
+                                                duration(p.run_time_secs)
+                                            } else {
+                                                trs("不可用")
+                                            })
+                                            .to_string(),
+                                        ),
+                                    ],
+                                )),
+                            ),
                     )
                     .child(
                         Button::new("location")
                             .small()
                             .ghost()
                             .icon(UiIcon::FolderOpen)
-                            .label("打开文件位置")
+                            .label(tr("打开文件位置"))
                             .disabled(path.is_none())
                             .on_click(cx.listener({
                                 let path = path.clone();
@@ -1453,7 +1599,7 @@ impl SystemMonitorApp {
                                             "正在打开文件位置",
                                             move || {
                                                 platform::open_file_location(&path)?;
-                                                Ok("文件位置已打开".into())
+                                                Ok(msg("文件位置已打开"))
                                             },
                                             cx,
                                         );
@@ -1467,7 +1613,7 @@ impl SystemMonitorApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .truncate()
-                    .child(path.unwrap_or_else(|| "系统或受保护进程：路径不可访问".into())),
+                    .child(path.unwrap_or_else(|| trs("系统或受保护进程：路径不可访问"))),
             )
             .child(
                 h_flex()
@@ -1476,7 +1622,7 @@ impl SystemMonitorApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("进程优先级"),
+                            .child(tr("进程优先级")),
                     )
                     .children(
                         [
@@ -1491,7 +1637,7 @@ impl SystemMonitorApp {
                             Button::new(format!("priority-{name}"))
                                 .small()
                                 .ghost()
-                                .label(name)
+                                .label(tr(name))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.run_operation(
                                         "正在设置优先级",
@@ -1501,7 +1647,7 @@ impl SystemMonitorApp {
                                                 p.start_time_windows_ticks.unwrap_or(0),
                                                 priority,
                                             )?;
-                                            Ok(format!("优先级已设为{name}"))
+                                            Ok(mlf("优先级已设为{name}", &[("name", msg(name))]))
                                         },
                                         cx,
                                     );
@@ -1509,13 +1655,24 @@ impl SystemMonitorApp {
                         }),
                     ),
             )
+            .when_some(
+                self.processes.read(cx).delegate().selected_group_note(),
+                |e, note| {
+                    e.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(diagnostic(note)),
+                    )
+                },
+            )
             .child(self.extra_process_controls(p, cx))
             .child(self.selected_process_details(cx))
             .into_any_element()
     }
     fn chart(
         &self,
-        title: impl Into<SharedString>,
+        title: &'static str,
         value: String,
         metric: fn(&HistoryPoint) -> Option<f64>,
         domain: Option<(f64, f64)>,
@@ -1544,7 +1701,7 @@ impl SystemMonitorApp {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(title.into()))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(tr(title)))
                     .child(
                         div()
                             .font_family("Consolas")
@@ -1562,20 +1719,23 @@ impl SystemMonitorApp {
                             .items_center()
                             .justify_center()
                             .text_color(cx.theme().muted_foreground)
-                            .child("等待有效采样")
+                            .child(tr("等待有效采样"))
                     }),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("最近 120 次采样"),
+                    .child(tr("最近 120 次采样")),
             )
             .into_any_element()
     }
     fn performance(&self, cx: &Context<Self>) -> AnyElement {
         let Some(s) = self.snapshot.as_deref() else {
-            return div().p_8().child("正在采集系统信息…").into_any_element();
+            return div()
+                .p_8()
+                .child(tr("正在采集系统信息…"))
+                .into_any_element();
         };
         v_flex()
             .id("performance-scroll")
@@ -1644,7 +1804,7 @@ impl SystemMonitorApp {
                     .border_color(cx.theme().border)
                     .text_lg()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("系统内存与对象"),
+                    .child(tr("系统内存与对象")),
             )
             .children(
                 [
@@ -1698,14 +1858,14 @@ impl SystemMonitorApp {
                     ("本次采集耗时", format!("{:.2} ms", s.collector_duration_ms)),
                 ]
                 .into_iter()
-                .map(|(label, value)| Self::detail_row(label, value, cx)),
+                .map(|(label, value)| Self::detail_row(tr(label), value, cx)),
             )
             .when_some(s.process_collection_note.clone(), |e, note| {
                 e.child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(note),
+                        .child(diagnostic(&note)),
                 )
             })
             .child(
@@ -1715,22 +1875,32 @@ impl SystemMonitorApp {
                     .pt_5()
                     .text_lg()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("逻辑处理器"),
+                    .child(tr("逻辑处理器")),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
+                    .child(tf(
                         "{} · {} 逻辑处理器 · {} · {}",
-                        s.cpu_name,
-                        s.logical_cpus,
-                        s.physical_cores
-                            .map(|n| format!("{n} 物理核心"))
-                            .unwrap_or_else(|| "物理核心数不可用".into()),
-                        s.cpu_frequency_mhz
-                            .map(|n| format!("{:.2} GHz", n as f64 / 1000.))
-                            .unwrap_or_else(|| "频率不可用".into())
+                        &[
+                            ("arg0", s.cpu_name.to_string()),
+                            ("arg1", format!("{}", s.logical_cpus)),
+                            (
+                                "arg2",
+                                s.physical_cores
+                                    .map(|n| tf("{n} 物理核心", &[("n", n.to_string())]))
+                                    .unwrap_or_else(|| trs("物理核心数不可用"))
+                                    .to_string(),
+                            ),
+                            (
+                                "arg3",
+                                s.cpu_frequency_mhz
+                                    .map(|n| format!("{:.2} GHz", n as f64 / 1000.))
+                                    .unwrap_or_else(|| trs("频率不可用"))
+                                    .to_string(),
+                            ),
+                        ],
                     )),
             )
             .child(
@@ -1782,7 +1952,7 @@ impl SystemMonitorApp {
     }
     fn devices(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(s) = self.snapshot.as_deref() else {
-            return div().p_8().child("正在读取设备…").into_any_element();
+            return div().p_8().child(tr("正在读取设备…")).into_any_element();
         };
         v_flex()
             .id("devices-scroll")
@@ -1796,27 +1966,33 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("系统信息"),
+                            .child(tr("系统信息")),
                     )
-                    .child(Self::detail_row("计算机", s.host_name.clone(), cx))
-                    .child(Self::detail_row("操作系统", s.os_version.clone(), cx))
-                    .child(Self::detail_row("处理器", s.cpu_name.clone(), cx))
+                    .child(Self::detail_row(tr("计算机"), s.host_name.clone(), cx))
+                    .child(Self::detail_row(tr("操作系统"), s.os_version.clone(), cx))
+                    .child(Self::detail_row(tr("处理器"), s.cpu_name.clone(), cx))
                     .child(Self::detail_row(
-                        "物理内存",
-                        format!(
+                        tr("物理内存"),
+                        tf(
                             "已用 {} / 总计 {} · 可用 {}",
-                            bytes(s.memory_used),
-                            bytes(s.memory_total),
-                            bytes(s.memory_available)
+                            &[
+                                ("arg0", bytes(s.memory_used).to_string()),
+                                ("arg1", bytes(s.memory_total).to_string()),
+                                ("arg2", bytes(s.memory_available).to_string()),
+                            ],
                         ),
                         cx,
                     ))
                     .child(Self::detail_row(
-                        "交换空间",
+                        tr("交换空间"),
                         format!("{} / {}", bytes(s.swap_used), bytes(s.swap_total)),
                         cx,
                     ))
-                    .child(Self::detail_row("运行时间", duration(s.uptime_secs), cx)),
+                    .child(Self::detail_row(
+                        tr("运行时间"),
+                        duration(s.uptime_secs),
+                        cx,
+                    )),
             )
             .child(
                 v_flex()
@@ -1825,23 +2001,33 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("图形处理器"),
+                            .child(tr("图形处理器")),
                     )
                     .children(s.gpus.iter().map(|g| {
                         v_flex()
                             .child(Self::detail_row(
                                 g.name.clone(),
-                                format!(
+                                tf(
                                     "GPU {} · {} · 专用显存 {} / {} · 共享显存 {}",
-                                    g.index,
-                                    percent(g.usage_percent),
-                                    g.dedicated_memory_used
-                                        .map(bytes)
-                                        .unwrap_or_else(|| "不可用".into()),
-                                    bytes(g.dedicated_memory_total),
-                                    g.shared_memory_used
-                                        .map(bytes)
-                                        .unwrap_or_else(|| "不可用".into())
+                                    &[
+                                        ("arg0", format!("{}", g.index)),
+                                        ("arg1", percent(g.usage_percent).to_string()),
+                                        (
+                                            "arg2",
+                                            g.dedicated_memory_used
+                                                .map(bytes)
+                                                .unwrap_or_else(|| trs("不可用"))
+                                                .to_string(),
+                                        ),
+                                        ("arg3", bytes(g.dedicated_memory_total).to_string()),
+                                        (
+                                            "arg4",
+                                            g.shared_memory_used
+                                                .map(bytes)
+                                                .unwrap_or_else(|| trs("不可用"))
+                                                .to_string(),
+                                        ),
+                                    ],
                                 ),
                                 cx,
                             ))
@@ -1863,10 +2049,10 @@ impl SystemMonitorApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(g.status.clone()),
+                                    .child(diagnostic(&g.status)),
                             )
                             .child(Self::detail_row(
-                                "温度 / 风扇",
+                                tr("温度 / 风扇"),
                                 format!(
                                     "{} / {}",
                                     g.temperature_celsius
@@ -1879,7 +2065,7 @@ impl SystemMonitorApp {
                                 cx,
                             ))
                             .child(Self::detail_row(
-                                "功耗 / 上限",
+                                tr("功耗 / 上限"),
                                 format!(
                                     "{} / {}",
                                     g.power_watts
@@ -1892,7 +2078,7 @@ impl SystemMonitorApp {
                                 cx,
                             ))
                             .child(Self::detail_row(
-                                "核心 / 显存频率",
+                                tr("核心 / 显存频率"),
                                 format!(
                                     "{} / {}",
                                     g.core_clock_mhz
@@ -1905,7 +2091,7 @@ impl SystemMonitorApp {
                                 cx,
                             ))
                             .child(Self::detail_row(
-                                "PCI / 驱动",
+                                tr("PCI / 驱动"),
                                 format!(
                                     "{} · {} · PCIe {} × {}",
                                     g.pci_address
@@ -1922,7 +2108,7 @@ impl SystemMonitorApp {
                                 cx,
                             ))
                             .child(Self::detail_row(
-                                "VBIOS / 传感器来源",
+                                tr("VBIOS / 传感器来源"),
                                 format!(
                                     "{} · {}",
                                     g.vbios_version.as_deref().unwrap_or("—"),
@@ -1935,7 +2121,7 @@ impl SystemMonitorApp {
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(note),
+                                        .child(diagnostic(&note)),
                                 )
                             })
                     }))
@@ -1944,7 +2130,7 @@ impl SystemMonitorApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(n),
+                                .child(diagnostic(&n)),
                         )
                     }),
             )
@@ -1955,19 +2141,21 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("存储设备"),
+                            .child(tr("存储设备")),
                     )
                     .children(s.disks.iter().map(|d| {
                         Self::detail_row(
                             d.mount_point.clone(),
-                            format!(
+                            tf(
                                 "{} · {} · 可用 {} / {} · 读 {} · 写 {}",
-                                d.name,
-                                d.kind,
-                                bytes(d.available_bytes),
-                                bytes(d.total_bytes),
-                                rate(d.read_bytes_per_sec),
-                                rate(d.write_bytes_per_sec)
+                                &[
+                                    ("arg0", d.name.to_string()),
+                                    ("arg1", d.kind.to_string()),
+                                    ("arg2", bytes(d.available_bytes).to_string()),
+                                    ("arg3", bytes(d.total_bytes).to_string()),
+                                    ("arg4", rate(d.read_bytes_per_sec).to_string()),
+                                    ("arg5", rate(d.write_bytes_per_sec).to_string()),
+                                ],
                             ),
                             cx,
                         )
@@ -1980,18 +2168,20 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("网络接口"),
+                            .child(tr("网络接口")),
                     )
                     .children(s.networks.iter().map(|n| {
                         Self::detail_row(
                             n.name.clone(),
-                            format!(
+                            tf(
                                 "{} · {} · 接收 {} · 发送 {} · 累计接收 {}",
-                                n.state,
-                                n.mac_address,
-                                rate(n.received_bytes_per_sec),
-                                rate(n.transmitted_bytes_per_sec),
-                                bytes(n.total_received_bytes)
+                                &[
+                                    ("arg0", n.state.to_string()),
+                                    ("arg1", n.mac_address.to_string()),
+                                    ("arg2", rate(n.received_bytes_per_sec).to_string()),
+                                    ("arg3", rate(n.transmitted_bytes_per_sec).to_string()),
+                                    ("arg4", bytes(n.total_received_bytes).to_string()),
+                                ],
                             ),
                             cx,
                         )
@@ -2004,14 +2194,14 @@ impl SystemMonitorApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("温度传感器"),
+                            .child(tr("温度传感器")),
                     )
                     .children(s.temperatures.iter().map(|t| {
                         Self::detail_row(
                             t.label.clone(),
                             t.celsius
                                 .map(|v| format!("{v:.1} °C"))
-                                .unwrap_or_else(|| "不可用".into()),
+                                .unwrap_or_else(|| trs("不可用")),
                             cx,
                         )
                     }))
@@ -2020,7 +2210,7 @@ impl SystemMonitorApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(n),
+                                .child(diagnostic(&n)),
                         )
                     }),
             )
@@ -2034,38 +2224,49 @@ impl SystemMonitorApp {
             UpdatePhase::Checking | UpdatePhase::Downloading { .. }
         );
         let status = match &self.update_state.phase {
-            UpdatePhase::Idle => "等待后台检查".to_owned(),
-            UpdatePhase::Checking => "正在后台检查更新…".into(),
-            UpdatePhase::Current => "已是最新稳定版本".into(),
-            UpdatePhase::Available => format!(
+            UpdatePhase::Idle => trs("等待后台检查"),
+            UpdatePhase::Checking => trs("正在后台检查更新…"),
+            UpdatePhase::Current => trs("已是最新稳定版本"),
+            UpdatePhase::Available => tf(
                 "发现新版本 v{}",
-                self.update_state
-                    .release
-                    .as_ref()
-                    .map(|r| r.version.as_str())
-                    .unwrap_or("—")
+                &[(
+                    "arg0",
+                    self.update_state
+                        .release
+                        .as_ref()
+                        .map(|r| r.version.as_str())
+                        .unwrap_or("—")
+                        .to_string(),
+                )],
             ),
-            UpdatePhase::Downloading { received, total } => {
-                format!("正在下载：{} / {}", bytes(*received), bytes(*total))
-            }
-            UpdatePhase::Ready(_) => "安装包已通过 SHA-256 校验，可以安装".into(),
-            UpdatePhase::Failed(error) => format!("更新检查/下载暂不可用：{error}"),
+            UpdatePhase::Downloading { received, total } => tf(
+                "正在下载：{} / {}",
+                &[
+                    ("arg0", bytes(*received).to_string()),
+                    ("arg1", bytes(*total).to_string()),
+                ],
+            ),
+            UpdatePhase::Ready(_) => trs("安装包已通过 SHA-256 校验，可以安装"),
+            UpdatePhase::Failed(error) => tf(
+                "更新检查/下载暂不可用：{error}",
+                &[("error", error.to_string())],
+            ),
         };
         let newer = self.update_state.release.as_ref().is_some_and(|r| {
             system_monitor_x::updater::is_newer(&r.version, env!("CARGO_PKG_VERSION"))
                 .unwrap_or(false)
         });
         v_flex().gap_3()
-            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("应用更新"))
+            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("应用更新")))
             .child(h_flex().gap_3()
-                .child(Button::new("auto-updates").label(if self.settings.auto_updates { "后台自动检查：开启" } else { "后台自动检查：关闭" }).on_click(cx.listener(|this, _, _, cx| {
+                .child(Button::new("auto-updates").label(tr(if self.settings.auto_updates { "后台自动检查：开启" } else { "后台自动检查：关闭" })).on_click(cx.listener(|this, _, _, cx| {
                     this.settings.auto_updates = !this.settings.auto_updates;
                     this.updater.set_enabled(this.settings.auto_updates);
                     this.update_state.enabled = this.settings.auto_updates;
                     let _ = this.settings_writer.send(this.settings.clone());
                     cx.notify();
                 })))
-                .child(Button::new("check-update").label("立即检查").disabled(busy).on_click(cx.listener(|this, _, _, cx| {
+                .child(Button::new("check-update").label(tr("立即检查")).disabled(busy).on_click(cx.listener(|this, _, _, cx| {
                     this.updater.check();
                     this.update_state.phase = UpdatePhase::Checking;
                     cx.notify();
@@ -2073,10 +2274,10 @@ impl SystemMonitorApp {
             .child(div().text_sm().child(status))
             .when_some(self.update_state.checked_at, |e, checked| {
                 let ago = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs().saturating_sub(checked);
-                e.child(div().text_xs().text_color(cx.theme().muted_foreground).child(format!("上次成功检查：{} 秒前", ago)))
+                e.child(div().text_xs().text_color(cx.theme().muted_foreground).child(tf("上次成功检查：{} 秒前", &[("arg0", format!("{}", ago))])))
             })
             .when(newer && !matches!(self.update_state.phase, UpdatePhase::Ready(_)), |e| {
-                e.child(Button::new("download-update").primary().label("一键更新").disabled(busy || self.operation_busy).on_click(cx.listener(|this, _, _, cx| {
+                e.child(Button::new("download-update").primary().label(tr("一键更新")).disabled(busy || self.operation_busy).on_click(cx.listener(|this, _, _, cx| {
                     this.install_after_download = true;
                     this.updater.download();
                     this.update_state.phase = UpdatePhase::Downloading { received: 0, total: this.update_state.release.as_ref().map(|r| r.installer_bytes).unwrap_or(0) };
@@ -2084,32 +2285,37 @@ impl SystemMonitorApp {
                 })))
             })
             .when(matches!(self.update_state.phase, UpdatePhase::Ready(_)), |e|
-                e.child(Button::new("install-update").primary().label("一键更新 · 安装已校验版本").disabled(self.operation_busy).on_click(cx.listener(|this, _, _, cx| this.install_update(cx)))))
+                e.child(Button::new("install-update").primary().label(tr("一键更新 · 安装已校验版本")).disabled(self.operation_busy).on_click(cx.listener(|this, _, _, cx| this.install_update(cx)))))
             .when_some(self.last_install_result.clone(), |e, result| {
                 let log = result.log_path.to_string_lossy().into_owned();
                 let mut details = v_flex().gap_1()
-                    .child(div().text_sm().child(format!("上次安装 v{}：{}", result.version, result.message)));
+                    .child(div().text_sm().child(tf("上次安装 v{}：{}", &[("arg0", result.version.to_string()), ("arg1", result.message.to_string())])));
                 if let Some(error) = result.restart_error {
-                    details = details.child(div().text_xs().child(format!("重新启动失败：{error}")));
+                    details = details.child(div().text_xs().child(tf("重新启动失败：{error}", &[("error", error.to_string())])));
                 }
-                e.child(details.child(Button::new("install-log").ghost().small().label("查看安装日志位置")
+                e.child(details.child(Button::new("install-log").ghost().small().label(tr("查看安装日志位置"))
                     .disabled(self.operation_busy).on_click(cx.listener(move |this, _, _, cx| {
                         let log = log.clone();
                         this.run_operation("正在打开安装日志", move || {
                             platform::open_file_location(&log)?;
-                            Ok("安装日志位置已打开".into())
+                            Ok(msg("安装日志位置已打开"))
                         }, cx);
                     }))))
             })
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child("应用运行时每 6 小时后台检查稳定版；网络失败后自动重试。点击“一键更新”后自动下载、校验，由独立安装助手完成升级并重新启动。便携版也会安装到本用户的应用目录。"))
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr("应用运行时每 6 小时后台检查稳定版；网络失败后自动重试。点击“一键更新”后自动下载、校验，由独立安装助手完成升级并重新启动。便携版也会安装到本用户的应用目录。")))
             .into_any_element()
     }
     fn apply_topmost(window: &Window, enabled: bool) -> anyhow::Result<()> {
         let RawWindowHandle::Win32(handle) = HasWindowHandle::window_handle(window)
-            .map_err(|e| anyhow::anyhow!("无法读取原生窗口句柄：{e:?}"))?
+            .map_err(|e| {
+                anyhow::anyhow!(tf(
+                    "无法读取原生窗口句柄：{e:?}",
+                    &[("e", format!("{e:?}"))]
+                ))
+            })?
             .as_raw()
         else {
-            anyhow::bail!("当前窗口不是 Windows 原生窗口");
+            anyhow::bail!(trs("当前窗口不是 Windows 原生窗口"));
         };
         system_monitor_x::runtime::set_window_topmost(handle.hwnd.get(), enabled)
     }
@@ -2118,7 +2324,7 @@ impl SystemMonitorApp {
             return;
         }
         self.operation_busy = true;
-        self.message = Some("等待 Windows 管理员权限确认…".into());
+        self.message = Some(msg("等待 Windows 管理员权限确认…"));
         cx.notify();
         cx.spawn(async move |view, cx| {
             let result = smol::unblock(system_monitor_x::runtime::relaunch_elevated).await;
@@ -2126,7 +2332,7 @@ impl SystemMonitorApp {
             let _ = view.update(cx, |this, cx| {
                 this.operation_busy = false;
                 if let Err(error) = result {
-                    this.message = Some(format!("{error:#}"));
+                    this.message = Some(format!("{error:#}").into());
                 }
                 cx.notify();
             });
@@ -2136,31 +2342,198 @@ impl SystemMonitorApp {
         })
         .detach();
     }
+    fn set_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.language = language;
+        self.resolved_language = system_monitor_x::i18n::set_language(language);
+        self.search.update(cx, |input, cx| {
+            input.set_placeholder(tr(self.page.search_source()), window, cx)
+        });
+        self.task_input.update(cx, |input, cx| {
+            input.set_placeholder(tr("例如 notepad.exe 或可执行文件路径"), window, cx)
+        });
+        // Refresh cached headers only; the native identities, query, ordering,
+        // row selection, column widths and hidden-column state stay in place.
+        self.processes.update(cx, |table, cx| {
+            table.refresh(cx);
+            tables::sync_selection(table, cx);
+            cx.notify();
+        });
+        self.ports.update(cx, |table, cx| {
+            table.refresh(cx);
+            ports::sync_selection(table, cx);
+            cx.notify();
+        });
+        for table in [
+            &self.services,
+            &self.startup,
+            &self.users,
+            &self.app_history,
+        ] {
+            table.update(cx, |table, cx| {
+                table.delegate_mut().rebuild();
+                table.refresh(cx);
+                tables::sync_text_selection(table, cx);
+                cx.notify();
+            });
+        }
+        // Localized session client/protocol fallbacks derive from the cached snapshot.
+        self.users_display_seq = None;
+        self.refresh_visible_snapshot(cx);
+        self.rebuild_hardware_presentation(cx);
+        let _ = self.settings_writer.send(self.settings.clone());
+        cx.notify();
+        window.refresh();
+    }
+    fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .id("page-toolbar")
+            .flex_shrink_0()
+            .px_6()
+            .py_3()
+            .gap_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .gap_3()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .id("page-title")
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(self.page.title()),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .gap_2()
+                            .child(
+                                Button::new("pause")
+                                    .ghost()
+                                    .small()
+                                    .icon(if self.paused {
+                                        UiIcon::Play
+                                    } else {
+                                        UiIcon::Pause
+                                    })
+                                    .tooltip("Ctrl + P")
+                                    .label(tr(if self.paused { "恢复" } else { "暂停" }))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_pause(&TogglePause, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("new-task")
+                                    .small()
+                                    .icon(UiIcon::Plus)
+                                    .label(tr("运行新任务"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.new_task(&NewTask, window, cx)
+                                    })),
+                            ),
+                    ),
+            )
+            .when(
+                matches!(
+                    self.page,
+                    Page::Processes
+                        | Page::Details
+                        | Page::Services
+                        | Page::Startup
+                        | Page::Users
+                        | Page::History
+                        | Page::Ports
+                ),
+                |element| {
+                    element.child(
+                        div().w_full().child(
+                            Input::new(&self.search)
+                                .prefix(Icon::new(UiIcon::Search).size(px(16.)))
+                                .small(),
+                        ),
+                    )
+                },
+            )
+            .into_any_element()
+    }
+    fn language_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .id("language-section")
+            .gap_3()
+            .child(
+                div()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(tr("界面语言")),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(Language::ALL.into_iter().map(|language| {
+                        Button::new(format!("language-{}", language.tag()))
+                            .small()
+                            .label(if language == Language::System {
+                                tr("跟随系统")
+                            } else {
+                                language.native_name().into()
+                            })
+                            .when(self.settings.language == language, |button| {
+                                button.primary()
+                            })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_language(language, window, cx)
+                            }))
+                    })),
+            )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .child(tr("当前界面语言"))
+                    .child(self.resolved_language.native_name()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr("语言选择会自动保存，并立即应用到所有页面。")),
+            )
+            .into_any_element()
+    }
     fn settings_view(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex().id("settings-scroll").size_full().overflow_y_scroll().p_8().gap_6().child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("采样与外观"))
-            .child(h_flex().gap_6().child(div().w(px(150.)).child("刷新间隔")).children([(500,"0.5 秒"),(1000,"1 秒"),(2000,"2 秒")].into_iter().map(|(ms,label)|Button::new(format!("interval-{ms}")).label(label).when(self.settings.interval_ms==ms,|b|b.primary()).on_click(cx.listener(move|this,_,_,cx|{this.settings.interval_ms=ms;this.interval.store(ms,Ordering::Relaxed);let _=this.settings_writer.send(this.settings.clone());cx.notify();})))))
-            .child(h_flex().gap_6().child(div().w(px(150.)).child("主题")).child(Button::new("theme").label(if self.settings.dark {"切换为浅色"}else{"切换为深色"}).on_click(cx.listener(|this,_,w,cx|{this.settings.dark = !this.settings.dark;Theme::change(if this.settings.dark{ThemeMode::Dark}else{ThemeMode::Light},Some(w),cx);let _=this.settings_writer.send(this.settings.clone());cx.notify();}))))
-            .child(div().pt_5().border_t_1().border_color(cx.theme().border).text_lg().font_weight(FontWeight::SEMIBOLD).child("快捷键")).child(Self::detail_row("Ctrl + F","搜索",cx)).child(Self::detail_row("Ctrl + N","运行新任务",cx)).child(Self::detail_row("Ctrl + E","导出进程 CSV",cx)).child(Self::detail_row("Ctrl + P","暂停 / 恢复显示",cx))
-            .child(h_flex().gap_6().child(div().w(px(150.)).child("窗口置顶")).child(Button::new("topmost").label(if self.settings.always_on_top {"已开启 · 点击关闭"} else {"开启置顶"}).on_click(cx.listener(|this,_,window,cx| {
+        v_flex().id("settings-scroll").size_full().overflow_y_scroll().p_8().gap_6().child(self.language_selector(cx)).child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("采样与外观")))
+            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("刷新间隔"))).children([(500,"0.5 秒"),(1000,"1 秒"),(2000,"2 秒")].into_iter().map(|(ms,label)|Button::new(format!("interval-{ms}")).label(tr(label)).when(self.settings.interval_ms==ms,|b|b.primary()).on_click(cx.listener(move|this,_,_,cx|{this.settings.interval_ms=ms;this.interval.store(ms,Ordering::Relaxed);let _=this.settings_writer.send(this.settings.clone());cx.notify();})))))
+            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("主题"))).child(Button::new("theme").label(tr(if self.settings.dark {"切换为浅色"}else{"切换为深色"})).on_click(cx.listener(|this,_,w,cx|{this.settings.dark = !this.settings.dark;Theme::change(if this.settings.dark{ThemeMode::Dark}else{ThemeMode::Light},Some(w),cx);let _=this.settings_writer.send(this.settings.clone());cx.notify();}))))
+            .child(div().pt_5().border_t_1().border_color(cx.theme().border).text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("快捷键"))).child(Self::detail_row("Ctrl + F",trs("搜索"),cx)).child(Self::detail_row("Ctrl + N",trs("运行新任务"),cx)).child(Self::detail_row("Ctrl + E",trs("导出进程 CSV"),cx)).child(Self::detail_row("Ctrl + P",trs("暂停 / 恢复显示"),cx))
+            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("窗口置顶"))).child(Button::new("topmost").label(tr(if self.settings.always_on_top {"已开启 · 点击关闭"} else {"开启置顶"})).on_click(cx.listener(|this,_,window,cx| {
                 let next = !this.settings.always_on_top;
                 match Self::apply_topmost(window, next) {
                     Ok(()) => { this.settings.always_on_top = next; let _ = this.settings_writer.send(this.settings.clone()); },
-                    Err(error) => this.message = Some(error.to_string()),
+                    Err(error) => this.message = Some(error.to_string().into()),
                 }cx.notify();
             }))))
-            .child(h_flex().gap_6().child(div().w(px(150.)).child("访问权限")).child(Button::new("elevate").label(if self.elevated {"已是管理员"} else {"以管理员身份重新启动"}).disabled(self.elevated || self.operation_busy).on_click(cx.listener(|this,_,_,cx| this.restart_as_admin(cx)))))
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child("逐进程网络跟踪、其他用户的进程及部分管理操作需要管理员权限。重新启动时由 Windows 请求权限确认。"))
+            .child(h_flex().gap_6().child(div().w(px(150.)).child(tr("访问权限"))).child(Button::new("elevate").label(tr(if self.elevated {"已是管理员"} else {"以管理员身份重新启动"})).disabled(self.elevated || self.operation_busy).on_click(cx.listener(|this,_,_,cx| this.restart_as_admin(cx)))))
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr("逐进程网络跟踪、其他用户的进程及部分管理操作需要管理员权限。重新启动时由 Windows 请求权限确认。")))
             .child(self.update_panel(cx))
-            .child(div().pt_5().text_lg().font_weight(FontWeight::SEMIBOLD).child("关于 SystemMonitorX")).child(div().text_color(cx.theme().muted_foreground).child(format!("v{} · 原生 Rust · Longbridge GPUI Kit 0.7.1 · Windows 10 1803+ / 11 x64", env!("CARGO_PKG_VERSION"))))
-            .child(div().text_color(cx.theme().muted_foreground).child("数据来自 Windows 原生进程接口、DXGI、PDH、ETW、WMI 和 NVML。GPU 使用率显示最忙引擎；DirectX 12 能力按显卡实际查询。驱动或权限未提供的字段显示 —。"))
-            .child(Button::new("github").ghost().label("在 GitHub 查看源码").on_click(|_,_,cx|cx.open_url("https://github.com/neko233-com/SystemMonitorX"))).into_any_element()
+            .child(div().pt_5().text_lg().font_weight(FontWeight::SEMIBOLD).child(tr("关于 SystemMonitorX"))).child(div().text_color(cx.theme().muted_foreground).child(tf("v{} · 原生 Rust · Longbridge GPUI Kit 0.7.3 · Windows 10 1803+ / 11 x64", &[("arg0", env!("CARGO_PKG_VERSION").to_string())])))
+            .child(div().text_color(cx.theme().muted_foreground).child(tr("数据来自 Windows 原生进程接口、DXGI、PDH、ETW、WMI 和 NVML。GPU 使用率显示最忙引擎；DirectX 12 能力按显卡实际查询。驱动或权限未提供的字段显示 —。")))
+            .child(Button::new("github").ghost().label(tr("在 GitHub 查看源码")).on_click(|_,_,cx|cx.open_url("https://github.com/neko233-com/SystemMonitorX"))).into_any_element()
     }
 }
 impl Render for SystemMonitorApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .size_full()
-            .font_family("Microsoft YaHei UI")
+            .font_family(match self.resolved_language {
+                Language::ZhCn => "Microsoft YaHei UI",
+                Language::JaJp => "Yu Gothic UI",
+                Language::KoKr => "Malgun Gothic",
+                _ => "Segoe UI",
+            })
             .text_sm()
             .text_color(cx.theme().foreground)
             .bg(cx.theme().background)
@@ -2178,69 +2551,7 @@ impl Render for SystemMonitorApp {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(
-                        h_flex()
-                            .h(px(76.))
-                            .flex_shrink_0()
-                            .px_6()
-                            .gap_5()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(self.page.title()),
-                            )
-                            .child(div().flex_1())
-                            .when(
-                                matches!(
-                                    self.page,
-                                    Page::Processes
-                                        | Page::Details
-                                        | Page::Services
-                                        | Page::Startup
-                                        | Page::Users
-                                        | Page::History
-                                        | Page::Ports
-                                ),
-                                |e| {
-                                    e.child(
-                                        div().w(px(310.)).child(
-                                            Input::new(&self.search)
-                                                .prefix(Icon::new(UiIcon::Search).size(px(16.)))
-                                                .small(),
-                                        ),
-                                    )
-                                },
-                            )
-                            .child(
-                                Button::new("pause")
-                                    .ghost()
-                                    .small()
-                                    .icon(if self.paused {
-                                        UiIcon::Play
-                                    } else {
-                                        UiIcon::Pause
-                                    })
-                                    .tooltip("Ctrl + P")
-                                    .label(if self.paused { "恢复" } else { "暂停" })
-                                    .on_click(cx.listener(|this, _, w, cx| {
-                                        this.toggle_pause(&TogglePause, w, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("new-task")
-                                    .small()
-                                    .icon(UiIcon::Plus)
-                                    .label("运行新任务")
-                                    .on_click(
-                                        cx.listener(|this, _, w, cx| {
-                                            this.new_task(&NewTask, w, cx)
-                                        }),
-                                    ),
-                            ),
-                    )
+                    .child(self.toolbar(cx))
                     .when(
                         matches!(
                             self.page,
@@ -2255,7 +2566,15 @@ impl Render for SystemMonitorApp {
                                 .py_2()
                                 .bg(cx.theme().secondary)
                                 .justify_between()
-                                .child(div().flex_1().child(message))
+                                .child(
+                                    div()
+                                        .id("feedback-scroll")
+                                        .flex_1()
+                                        .min_w_0()
+                                        .max_h(px(64.))
+                                        .overflow_y_scroll()
+                                        .child(message.render()),
+                                )
                                 .child(
                                     Button::new("dismiss")
                                         .ghost()
@@ -2280,18 +2599,24 @@ impl Render for SystemMonitorApp {
                                     .py_2()
                                     .gap_4()
                                     .bg(cx.theme().secondary)
-                                    .child(div().flex_1().child(format!(
+                                    .child(
+                                        div().flex_1().child(tf(
                                             "SystemMonitorX v{} 可更新",
-                                            self.update_state
-                                                .release
-                                                .as_ref()
-                                                .map(|r| r.version.as_str())
-                                                .unwrap_or("—")
-                                        )))
+                                            &[(
+                                                "arg0",
+                                                self.update_state
+                                                    .release
+                                                    .as_ref()
+                                                    .map(|r| r.version.as_str())
+                                                    .unwrap_or("—")
+                                                    .to_string(),
+                                            )],
+                                        )),
+                                    )
                                     .child(
                                         Button::new("show-update")
                                             .small()
-                                            .label("查看更新")
+                                            .label(tr("查看更新"))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.set_page(Page::Settings, window, cx)
                                             })),
@@ -2301,7 +2626,7 @@ impl Render for SystemMonitorApp {
                     )
                     .child(
                         div().flex_1().min_h_0().child(match self.page {
-                            Page::Processes | Page::Details => self.process_view(cx),
+                            Page::Processes | Page::Details => self.process_view(window, cx),
                             Page::Ports => self.ports_view(cx),
                             Page::Users => self.users_view(cx),
                             Page::History => self.app_history_view(cx),
@@ -2321,11 +2646,11 @@ impl Render for SystemMonitorApp {
                                             Button::new("refresh-metadata")
                                                 .small()
                                                 .ghost()
-                                                .label(if self.metadata_loading {
+                                                .label(tr(if self.metadata_loading {
                                                     "读取中…"
                                                 } else {
                                                     "刷新列表"
-                                                })
+                                                }))
                                                 .disabled(self.metadata_loading)
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.refresh_metadata(cx)
@@ -2361,27 +2686,32 @@ impl Render for SystemMonitorApp {
                             } else {
                                 rgb(0x6ac794)
                             }))
-                            .child(if self.paused {
+                            .child(tr(if self.paused {
                                 "显示已暂停"
                             } else if self.snapshot.is_none() {
                                 "正在连接系统…"
                             } else {
                                 "实时采集"
-                            })
-                            .child(format!(
+                            }))
+                            .child(tf(
                                 "· {:.1} 秒",
-                                self.settings.interval_ms as f64 / 1000.
+                                &[(
+                                    "arg0",
+                                    format!("{:.1}", self.settings.interval_ms as f64 / 1000.),
+                                )],
                             ))
                             .child(div().flex_1())
                             .child(
                                 self.snapshot
                                     .as_ref()
                                     .map(|s| {
-                                        format!(
+                                        tf(
                                             "{} · 采集 {:.1} ms · 运行时间 {}",
-                                            s.host_name,
-                                            s.collector_duration_ms,
-                                            duration(s.uptime_secs)
+                                            &[
+                                                ("arg0", s.host_name.to_string()),
+                                                ("arg1", format!("{:.1}", s.collector_duration_ms)),
+                                                ("arg2", duration(s.uptime_secs).to_string()),
+                                            ],
                                         )
                                     })
                                     .unwrap_or_else(|| "Windows x64".into()),
@@ -2395,7 +2725,8 @@ pub fn run() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            gpui_kit::component::set_locale("zh-CN");
+            system_monitor_x::i18n::register_components(gpui_kit::component::_rust_i18n_extend);
+            // The saved preference is resolved before creating input/table state.
             cx.bind_keys([
                 KeyBinding::new("ctrl-f", FocusSearch, Some("SystemMonitorX")),
                 KeyBinding::new("ctrl-p", TogglePause, Some("SystemMonitorX")),
@@ -2447,4 +2778,58 @@ pub fn run() {
                 cx.activate(true);
             }
         });
+}
+
+fn session_protocol(value: Option<&str>) -> String {
+    match value {
+        Some("本地控制台") => trs("本地控制台"),
+        Some(value) => {
+            if let Some(code) = value
+                .strip_prefix("协议 ")
+                .and_then(|number| number.parse::<u16>().ok())
+            {
+                tf("协议 {value}", &[("value", code.to_string())])
+            } else {
+                value.to_owned()
+            }
+        }
+        None => "—".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::Settings;
+    use system_monitor_x::i18n::Language;
+    #[test]
+    fn legacy_and_unknown_language_settings_keep_other_preferences() {
+        let legacy: Settings = serde_json::from_str(r#"{"interval_ms":2000,"dark":false,"hidden_process_columns":[3,6],"group_processes":false}"#).unwrap();
+        assert_eq!(legacy.language, Language::System);
+        assert_eq!(legacy.interval_ms, 2000);
+        assert!(!legacy.dark && !legacy.group_processes);
+        for invalid in [r#""future-language""#, "null", "17", "{}"] {
+            let raw = format!(
+                r#"{{"language":{},"interval_ms":500,"always_on_top":true}}"#,
+                invalid
+            );
+            let loaded: Settings = serde_json::from_str(&raw).unwrap();
+            assert_eq!(loaded.language, Language::System);
+            assert_eq!(loaded.interval_ms, 500);
+            assert!(loaded.always_on_top);
+        }
+    }
+    #[test]
+    fn every_language_preference_round_trips_without_changing_columns() {
+        for language in Language::ALL {
+            let value = Settings {
+                language,
+                hidden_process_columns: vec![3, 8],
+                ..Settings::default()
+            };
+            let restored: Settings =
+                serde_json::from_slice(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(restored.language, language);
+            assert_eq!(restored.hidden_process_columns, vec![3, 8]);
+        }
+    }
 }

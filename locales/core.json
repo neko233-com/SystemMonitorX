@@ -1,0 +1,53 @@
+{
+  "_version": 2,
+  "i18n.language": {
+    "zh-CN": "界面语言",
+    "en-US": "Interface language",
+    "ja-JP": "表示言語",
+    "ko-KR": "표시 언어",
+    "de-DE": "Sprache der Oberfläche",
+    "fr-FR": "Langue de l’interface",
+    "es-ES": "Idioma de la interfaz",
+    "pt-BR": "Idioma da interface"
+  },
+  "i18n.system": {
+    "zh-CN": "跟随系统",
+    "en-US": "System default",
+    "ja-JP": "システム設定に従う",
+    "ko-KR": "시스템 기본값",
+    "de-DE": "Systemstandard",
+    "fr-FR": "Langue du système",
+    "es-ES": "Idioma del sistema",
+    "pt-BR": "Padrão do sistema"
+  },
+  "i18n.system_resolved": {
+    "zh-CN": "跟随系统（%{language}）",
+    "en-US": "System default (%{language})",
+    "ja-JP": "システム設定（%{language}）",
+    "ko-KR": "시스템 기본값 (%{language})",
+    "de-DE": "Systemstandard (%{language})",
+    "fr-FR": "Langue du système (%{language})",
+    "es-ES": "Idioma del sistema (%{language})",
+    "pt-BR": "Padrão do sistema (%{language})"
+  },
+  "i18n.language_saved": {
+    "zh-CN": "已保存界面语言。",
+    "en-US": "Interface language saved.",
+    "ja-JP": "表示言語を保存しました。",
+    "ko-KR": "표시 언어가 저장되었습니다.",
+    "de-DE": "Sprache der Oberfläche gespeichert.",
+    "fr-FR": "Langue de l’interface enregistrée.",
+    "es-ES": "Se guardó el idioma de la interfaz.",
+    "pt-BR": "Idioma da interface salvo."
+  },
+  "i18n.unsupported_system": {
+    "zh-CN": "系统语言 %{locale} 暂不支持，使用英语。",
+    "en-US": "System language %{locale} is not supported; using English.",
+    "ja-JP": "システム言語 %{locale} は未対応のため、英語を使用します。",
+    "ko-KR": "시스템 언어 %{locale}은(는) 지원되지 않아 영어를 사용합니다.",
+    "de-DE": "Die Systemsprache %{locale} wird nicht unterstützt. Englisch wird verwendet.",
+    "fr-FR": "La langue du système %{locale} n’est pas prise en charge ; l’anglais est utilisé.",
+    "es-ES": "El idioma del sistema %{locale} no es compatible; se usa inglés.",
+    "pt-BR": "O idioma do sistema %{locale} não é compatível; será usado inglês."
+  }
+}

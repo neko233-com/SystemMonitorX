@@ -1,4 +1,8 @@
 fn main() {
+    // rust-i18n reads catalogs in its macro; Cargo must watch those inputs
+    // explicitly so JSON-only edits reach incremental release builds.
+    println!("cargo:rerun-if-changed=locales");
+    println!("cargo:rerun-if-changed=assets/app.ico");
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=assets/update-helper.manifest");

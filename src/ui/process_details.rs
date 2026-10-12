@@ -7,6 +7,47 @@ fn optional_text(value: &Option<String>) -> String {
         .unwrap_or_else(|| "—".into())
 }
 
+// Architecture and priority are app-authored descriptions of typed Windows values.
+// File resource names, company text, paths, command lines and signer names never
+// pass through this localization boundary.
+fn architecture_text(value: &Option<String>) -> String {
+    let Some(value) = value.as_deref().filter(|value| !value.is_empty()) else {
+        return "—".into();
+    };
+    match value {
+        "x86（32 位）" => trs("x86（32 位）"),
+        "x64（64 位）" => trs("x64（64 位）"),
+        "ARM Thumb-2（32 位）" => trs("ARM Thumb-2（32 位）"),
+        _ => {
+            if let Some(raw_machine) = value.strip_prefix("机器架构 0x") {
+                tf(
+                    "机器架构 0x{value:04X}",
+                    &[("value", raw_machine.to_owned())],
+                )
+            } else {
+                value.to_owned()
+            }
+        }
+    }
+}
+
+fn priority_text(details: &ProcessDetails) -> String {
+    use windows::Win32::System::Threading::{
+        ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS,
+        IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, REALTIME_PRIORITY_CLASS,
+    };
+    match details.priority_class {
+        Some(value) if value == IDLE_PRIORITY_CLASS.0 => trs("低"),
+        Some(value) if value == BELOW_NORMAL_PRIORITY_CLASS.0 => trs("低于正常"),
+        Some(value) if value == NORMAL_PRIORITY_CLASS.0 => trs("正常"),
+        Some(value) if value == ABOVE_NORMAL_PRIORITY_CLASS.0 => trs("高于正常"),
+        Some(value) if value == HIGH_PRIORITY_CLASS.0 => trs("高"),
+        Some(value) if value == REALTIME_PRIORITY_CLASS.0 => trs("实时"),
+        Some(value) => tf("优先级 0x{value:08X}", &[("value", format!("{value:08X}"))]),
+        None => optional_text(&details.priority),
+    }
+}
+
 impl SystemMonitorApp {
     pub(super) fn refresh_process_details(&mut self, pid: u32, ticks: u64, cx: &mut Context<Self>) {
         let identity = (pid, ticks);
@@ -45,7 +86,7 @@ impl SystemMonitorApp {
                 if !still_alive {
                     this.process_details = None;
                     this.process_details_error =
-                        Some("所选进程已退出或身份已改变，详情已过期".into());
+                        Some(msg("所选进程已退出或身份已改变，详情已过期"));
                 } else {
                     match result {
                         Ok(details) => {
@@ -54,8 +95,10 @@ impl SystemMonitorApp {
                         }
                         Err(error) => {
                             this.process_details = None;
-                            this.process_details_error =
-                                Some(format!("进程详情读取失败：{error:#}"));
+                            this.process_details_error = Some(mf(
+                                "进程详情读取失败：{error:#}",
+                                &[("error", format!("{error:#}"))],
+                            ));
                         }
                     }
                 }
@@ -85,7 +128,7 @@ impl SystemMonitorApp {
                 let path = before
                     .executable_path
                     .as_deref()
-                    .context("此进程的可执行文件路径不可用")?;
+                    .context(trs("此进程的可执行文件路径不可用"))?;
                 let signature = system_monitor_x::file_signature::verify_file_signature(
                     std::path::Path::new(path),
                 )?;
@@ -93,10 +136,11 @@ impl SystemMonitorApp {
                 let after_path = after
                     .executable_path
                     .as_deref()
-                    .context("验签后进程文件路径不可用")?;
+                    .context(trs("验签后进程文件路径不可用"))?;
                 ensure!(
                     std::path::Path::new(after_path).canonicalize()? == signature.file_path,
-                    "验签期间进程文件路径已变化"
+                    "{}",
+                    trs("验签期间进程文件路径已变化")
                 );
                 Ok(Arc::new(signature))
             })
@@ -115,14 +159,15 @@ impl SystemMonitorApp {
                 });
                 if !still_alive {
                     this.file_signature = None;
-                    this.file_signature_error =
-                        Some("所选进程已退出或身份已变化，请重新选择".into());
+                    this.file_signature_error = Some(msg("所选进程已退出或身份已变化，请重新选择"));
                 } else {
                     match result {
                         Ok(signature) => this.file_signature = Some(signature),
                         Err(error) => {
-                            this.file_signature_error =
-                                Some(format!("文件签名验证不可用：{error:#}"))
+                            this.file_signature_error = Some(mf(
+                                "文件签名验证不可用：{error:#}",
+                                &[("error", format!("{error:#}"))],
+                            ))
                         }
                     }
                 }
@@ -137,7 +182,7 @@ impl SystemMonitorApp {
             return div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("无法取得精确进程身份，详细信息暂不可用")
+                .child(tr("无法取得精确进程身份，详细信息暂不可用"))
                 .into_any_element();
         };
         let details = self
@@ -145,17 +190,17 @@ impl SystemMonitorApp {
             .as_deref()
             .filter(|details| details.pid == identity.0 && details.creation_ticks == identity.1);
         let summary = if self.process_details_loading {
-            "正在后台读取…".to_owned()
+            trs("正在后台读取…")
         } else if self.process_details_error.is_some() {
-            "部分详情不可用".to_owned()
+            trs("部分详情不可用")
         } else if let Some(details) = details {
             format!(
                 "{} · {}",
-                optional_text(&details.architecture),
+                architecture_text(&details.architecture),
                 optional_text(&details.file_version)
             )
         } else {
-            "按所选进程读取".to_owned()
+            trs("按所选进程读取")
         };
         let expanded = self.process_details_expanded;
         v_flex()
@@ -172,9 +217,9 @@ impl SystemMonitorApp {
                             .small()
                             .ghost()
                             .label(if expanded {
-                                "收起详情"
+                                tr("收起详情")
                             } else {
-                                "进程详情"
+                                tr("进程详情")
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.process_details_expanded = !this.process_details_expanded;
@@ -203,9 +248,9 @@ impl SystemMonitorApp {
                                 .small()
                                 .ghost()
                                 .label(if self.file_signature_loading {
-                                    "正在验证签名…"
+                                    tr("正在验证签名…")
                                 } else {
-                                    "验证文件签名"
+                                    tr("验证文件签名")
                                 })
                                 .disabled(
                                     self.file_signature_loading
@@ -225,7 +270,7 @@ impl SystemMonitorApp {
                             Button::new("refresh-process-details")
                                 .small()
                                 .ghost()
-                                .label("刷新详情")
+                                .label(tr("刷新详情"))
                                 .disabled(self.process_details_loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some((pid, ticks)) = this.process_details_identity {
@@ -251,55 +296,63 @@ impl SystemMonitorApp {
                     body = body.child(
                         div()
                             .text_color(cx.theme().muted_foreground)
-                            .child(error.clone()),
+                            .child(error.render()),
                     );
                 }
                 if let Some(error) = self.file_signature_error.as_ref() {
                     body = body.child(
                         div()
                             .text_color(cx.theme().muted_foreground)
-                            .child(error.clone()),
+                            .child(error.render()),
                     );
                 }
                 if let Some(signature) = self.file_signature.as_deref() {
                     use system_monitor_x::file_signature::{SignatureKind, SignatureStatus};
                     let status = match signature.status {
-                        SignatureStatus::VerifiedOffline => "本机离线信任验证通过",
-                        SignatureStatus::Unsigned => "未发现嵌入式或本机目录签名",
-                        SignatureStatus::Invalid => "签名无效或文件摘要不匹配",
-                        SignatureStatus::Untrusted => "签名证书链未被信任",
-                        SignatureStatus::Unavailable => "签名验证不可用或不完整",
+                        SignatureStatus::VerifiedOffline => trs("本机离线信任验证通过"),
+                        SignatureStatus::Unsigned => trs("未发现嵌入式或本机目录签名"),
+                        SignatureStatus::Invalid => trs("签名无效或文件摘要不匹配"),
+                        SignatureStatus::Untrusted => trs("签名证书链未被信任"),
+                        SignatureStatus::Unavailable => trs("签名验证不可用或不完整"),
                     };
                     let kind = match signature.signature_kind {
-                        SignatureKind::Embedded => "嵌入式签名",
-                        SignatureKind::Catalog => "本机目录签名",
-                        SignatureKind::None => "无已发现签名",
-                        SignatureKind::Unknown => "未知",
+                        SignatureKind::Embedded => trs("嵌入式签名"),
+                        SignatureKind::Catalog => trs("本机目录签名"),
+                        SignatureKind::None => trs("无已发现签名"),
+                        SignatureKind::Unknown => trs("未知"),
                     };
                     body = body
                         .child(Self::detail_row(
-                            "磁盘文件签名（本次验证）",
+                            tr("磁盘文件签名（本次验证）"),
                             format!("{status} · {kind}"),
                             cx,
                         ))
                         .child(Self::detail_row(
-                            "已验证签名发布者",
+                            tr("已验证签名发布者"),
                             optional_text(&signature.signer_name),
                             cx,
                         ))
                         .child(
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(signature.reason.clone()),
+                                .child(tf(
+                                    "原始诊断：{issue}",
+                                    &[("issue", signature.reason.clone())],
+                                ))
+                                .child(
+                                    div().text_xs().child(tr(
+                                        "仅使用本机证书信任与缓存；未联网查询证书吊销状态",
+                                    )),
+                                ),
                         )
                         .children(signature.issues.iter().map(|issue| {
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(issue.clone())
+                                .child(tf("原始诊断：{issue}", &[("issue", issue.clone())]))
                         }));
                     if let Some(timestamp) = &signature.timestamp {
                         body = body.child(Self::detail_row(
-                            "可信时间戳机构",
+                            tr("可信时间戳机构"),
                             optional_text(&timestamp.authority_name),
                             cx,
                         ));
@@ -312,8 +365,8 @@ impl SystemMonitorApp {
                             "进程 / 系统架构",
                             format!(
                                 "{} / {}",
-                                optional_text(&details.architecture),
-                                optional_text(&details.native_architecture)
+                                architecture_text(&details.architecture),
+                                architecture_text(&details.native_architecture)
                             ),
                         ),
                         ("文件版本", optional_text(&details.file_version)),
@@ -332,11 +385,15 @@ impl SystemMonitorApp {
                             "读取时优先级 / EcoQoS",
                             format!(
                                 "{} / {}",
-                                optional_text(&details.priority),
+                                priority_text(details),
                                 details
                                     .efficiency_mode
-                                    .map(|enabled| if enabled { "已启用" } else { "未启用" })
-                                    .unwrap_or("—")
+                                    .map(|enabled| trs(if enabled {
+                                        "已启用"
+                                    } else {
+                                        "未启用"
+                                    }))
+                                    .unwrap_or_else(|| "—".into())
                             ),
                         ),
                         ("当前目录", optional_text(&details.current_directory)),
@@ -344,25 +401,31 @@ impl SystemMonitorApp {
                     body = body
                         .children(
                             rows.into_iter()
-                                .map(|(label, value)| Self::detail_row(label, value, cx)),
+                                .map(|(label, value)| Self::detail_row(tr(label), value, cx)),
                         )
-                        .child(div().text_color(cx.theme().muted_foreground).child(
-                            details.file_metadata_source.clone().unwrap_or_else(|| {
-                                "版本资源未提供；公司文字不能作为已验证的签名发布者".into()
-                            }),
-                        ))
+                        .child(
+                            div().text_color(cx.theme().muted_foreground).child(
+                                details
+                                    .file_metadata_source
+                                    .as_deref()
+                                    .map(trs)
+                                    .unwrap_or_else(|| {
+                                        trs("版本资源未提供；公司文字不能作为已验证的签名发布者")
+                                    }),
+                            ),
+                        )
                         .children(details.issues.iter().map(|issue| {
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(issue.clone())
+                                .child(tf("原始诊断：{issue}", &[("issue", issue.clone())]))
                         }))
                         .child(
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("详情在选择进程或点击刷新时读取"),
+                                .child(tr("详情在选择进程或点击刷新时读取")),
                         );
                 } else if self.process_details_loading {
-                    body = body.child("正在后台读取所选进程的详细信息…");
+                    body = body.child(tr("正在后台读取所选进程的详细信息…"));
                 }
                 element.child(body)
             })

@@ -46,7 +46,7 @@ impl SystemMonitorApp {
                         cx.notify();
                     });
                     if this.settings_writer.send(this.settings.clone()).is_err() {
-                        this.message = Some("列显示设置暂时无法保存。".into());
+                        this.message = Some(msg("列显示设置暂时无法保存。"));
                     }
                     cx.notify();
                     window.refresh();
@@ -61,7 +61,7 @@ impl SystemMonitorApp {
                 .map(|view| view.read(cx).settings.hidden_process_columns.clone())
                 .unwrap_or_default();
             dialog
-                .title("选择进程列")
+                .title(tr("选择进程列"))
                 .width(px(500.))
                 .child(
                     v_flex()
@@ -70,7 +70,7 @@ impl SystemMonitorApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("勾选要显示的列。更改立即保存，进程名称始终显示。"),
+                                .child(tr("勾选要显示的列。更改立即保存，进程名称始终显示。")),
                         )
                         .child(
                             v_flex()
@@ -80,9 +80,10 @@ impl SystemMonitorApp {
                                 .overflow_y_scroll()
                                 .children(controls.iter().map(|(raw, name, on_change)| {
                                     let on_change = on_change.clone();
+                                    let name = trs(name);
                                     Checkbox::new(("process-column", *raw))
                                         .label(if *raw == 0 {
-                                            format!("{name}（始终显示）")
+                                            tf("{name}（始终显示）", &[("name", name.to_string())])
                                         } else {
                                             name.clone()
                                         })
@@ -98,14 +99,14 @@ impl SystemMonitorApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("线程、句柄、用户等字段可在「详细信息」页面选择。"),
+                                    .child(tr("线程、句柄、用户等字段可在「详细信息」页面选择。")),
                             )
                         }),
                 )
                 .footer(
                     h_flex().justify_end().child(
                         Button::new("process-columns-close")
-                            .label("关闭")
+                            .label(tr("关闭"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )

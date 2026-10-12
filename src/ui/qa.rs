@@ -12,6 +12,104 @@ fn capture(handle: AnyWindowHandle, cx: &mut App, path: &std::path::Path) -> Res
     })?
 }
 
+/// Reach an action in the intentionally bounded process inspector through
+/// real wheel dispatch. Scrolling is part of using this UI at its minimum size.
+async fn click_inspector_action(
+    handle: AnyWindowHandle,
+    id: &'static str,
+    directory: &std::path::Path,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    const MAX_ATTEMPTS: usize = 12;
+    let mut last_observation = serde_json::Value::Null;
+    for attempt in 0..=MAX_ATTEMPTS {
+        let step = cx.update(|cx| {
+            handle.update(cx, |_, window, cx| -> Result<(bool, serde_json::Value)> {
+                window.render_frame(cx);
+                let inspector = window
+                    .try_find("process-inspector-scroll")
+                    .context("native process inspector scroll region is not observed")?;
+                let container = inspector.bounds();
+                let viewport = Bounds::new(point(px(0.), px(0.)), window.viewport_size());
+                ensure!(
+                    inspector.visible()
+                        && container.size.width > px(0.)
+                        && container.size.height > px(0.)
+                        && container.center().x >= viewport.left()
+                        && container.center().x <= viewport.right()
+                        && container.center().y >= viewport.top()
+                        && container.center().y <= viewport.bottom(),
+                    "native process inspector scroll target is not visible: bounds={container:?}, viewport={viewport:?}"
+                );
+                let target = window.try_find(id);
+                let target_bounds = target.as_ref().map(|target| target.bounds());
+                let observation = serde_json::json!({
+                    "attempt":attempt,"action":id,"inspector_bounds":format!("{container:?}"),
+                    "viewport":format!("{viewport:?}"),"target_observed":target.is_some(),
+                    "target_visible":target.as_ref().map(|target|target.visible()),
+                    "target_disabled":target.as_ref().map(|target|target.disabled()),
+                    "target_bounds":target_bounds.map(|bounds|format!("{bounds:?}"))
+                });
+                let fully_inside = |bounds: Bounds<Pixels>, parent: Bounds<Pixels>| {
+                    bounds.left() >= parent.left() - px(1.)
+                        && bounds.top() >= parent.top() - px(1.)
+                        && bounds.right() <= parent.right() + px(1.)
+                        && bounds.bottom() <= parent.bottom() + px(1.)
+                };
+                if let Some(target) = target.as_ref()
+                    && target.visible()
+                    && target.bounds().size.width > px(0.)
+                    && target.bounds().size.height > px(0.)
+                    && fully_inside(target.bounds(), container)
+                    && fully_inside(target.bounds(), viewport)
+                {
+                    ensure!(target.disabled() != Some(true), "native inspector action {id} is disabled: {observation}");
+                    window.click(id, cx);
+                    return Ok((true, observation));
+                }
+                if attempt < MAX_ATTEMPTS {
+                    // GPUI's scroll delta is negative when moving content upward.
+                    // If the observed target is above the container, reverse to
+                    // avoid overshooting a button between bounded wheel steps.
+                    let delta_y = if target_bounds.is_some_and(|bounds| bounds.top() < container.top()) {
+                        px(80.)
+                    } else {
+                        px(-80.)
+                    };
+                    window.scroll(
+                        "process-inspector-scroll",
+                        ScrollDelta::Pixels(point(px(0.), delta_y)),
+                        cx,
+                    );
+                }
+                Ok((false, observation))
+            })?
+        });
+        match step {
+            Ok((clicked, observation)) => {
+                last_observation = observation;
+                if clicked {
+                    return Ok(());
+                }
+            }
+            Err(error) => {
+                let screenshot = directory.join("13-signature-scroll-failure.png");
+                let capture_result = cx.update(|cx| capture(handle, cx, &screenshot));
+                return Err(error).with_context(|| {
+                    format!("native inspector action {id} failed at attempt {attempt}; last layout={last_observation}; failure screenshot={screenshot:?}; capture={capture_result:?}")
+                });
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            smol::Timer::after(Duration::from_millis(50)).await;
+        }
+    }
+    let screenshot = directory.join("13-signature-scroll-failure.png");
+    let capture_result = cx.update(|cx| capture(handle, cx, &screenshot));
+    anyhow::bail!(
+        "native inspector action {id} not fully visible after {MAX_ATTEMPTS} wheel attempts; last layout={last_observation}; failure screenshot={screenshot:?}; capture={capture_result:?}"
+    )
+}
 pub fn start(
     handle: AnyWindowHandle,
     view: Entity<SystemMonitorApp>,
@@ -21,6 +119,7 @@ pub fn start(
     cx.spawn(async move |cx| {
         let mut performance = serde_json::Value::Null;
         let mut icon_source = serde_json::Value::Null;
+        let mut languages = serde_json::Value::Null;
         let result: Result<()> = async {
             std::fs::create_dir_all(&directory)?;
             let owned_tcp = std::net::TcpListener::bind("127.0.0.1:0")?;
@@ -57,7 +156,7 @@ pub fn start(
             smol::Timer::after(Duration::from_millis(150)).await;
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).paused,"pause shortcut failed");
-                handle.update(cx,|_,w,cx|{w.click("pause",cx);w.click("nav-性能",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click("pause",cx);w.click("nav-performance",cx);})?;
                 Ok::<(), anyhow::Error>(())
             })?;
             let hidden_delay = cx.update(|cx| view.read(cx).settings.interval_ms.saturating_mul(2).saturating_add(300));
@@ -67,7 +166,7 @@ pub fn start(
                 let app = view.read(cx);
                 ensure!(app.process_display_seq.is_some_and(|seq| seq < app.last_seq), "hidden process model was rebuilt while performance page was visible");
                 ensure!(app.users_display_seq.is_none() && app.history_display_seq.is_none(), "hidden users/history models were formatted before visiting them");                capture(handle,cx,&directory.join("03-performance.png"))?;
-                handle.update(cx,|_,w,cx|{w.click("nav-设备与传感器",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click("nav-devices",cx);})?;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(200)).await;
@@ -76,21 +175,21 @@ pub fn start(
                 ensure!(view.read(cx).hardware.is_some(), "hardware inventory did not arrive");
                 ensure!(view.read(cx).directx_inventory.as_ref().is_some_and(|i| !i.adapters.is_empty()), "DirectX inventory did not arrive");
                 capture(handle,cx,&directory.join("04-devices.png"))?;
-                handle.update(cx,|_,w,cx|{w.click("nav-服务",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click("nav-services",cx);})?;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).page==Page::Services && !view.read(cx).services.read(cx).delegate().rows.is_empty(),"services view empty");
                 capture(handle,cx,&directory.join("05-services.png"))?;
-                handle.update(cx,|_,w,cx|{w.click("nav-启动应用",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click("nav-startup",cx);})?;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
                 ensure!(view.read(cx).page==Page::Startup,"startup navigation failed");
                 capture(handle,cx,&directory.join("06-startup.png"))?;
-                handle.update(cx,|_,w,cx|{w.click("nav-设置",cx);})?;
+                handle.update(cx,|_,w,cx|{w.click("nav-settings",cx);})?;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(200)).await;
@@ -107,16 +206,16 @@ pub fn start(
             })?;
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
-                ensure!(view.read(cx).message.as_ref().is_some_and(|m|m.contains("启动失败")),"empty task must produce an error");
+                ensure!(view.read(cx).message.as_ref().is_some_and(|m|m.render().contains(&trs("启动失败：请输入任务命令"))),"empty task must produce an error");
                 handle.update(cx,|_,w,cx|{ensure!(w.has_active_dialog(cx),"failed launch dismissed dialog");w.click("task-cancel",cx);w.resize(size(px(1040.),px(640.)));w.refresh();Ok::<(),anyhow::Error>(())})??;
                 Ok::<(), anyhow::Error>(())
             })?;
             smol::Timer::after(Duration::from_millis(300)).await;
             cx.update(|cx| -> Result<()> {capture(handle,cx,&directory.join("09-small-window.png"))?;Ok::<(), anyhow::Error>(())})?;
             for (page, label, filename) in [
-                (Page::History, "nav-应用历史", "10-history.png"),
-                (Page::Users, "nav-用户", "11-users.png"),
-                (Page::Details, "nav-详细信息", "12-details.png"),
+                (Page::History, "nav-history", "10-history.png"),
+                (Page::Users, "nav-users", "11-users.png"),
+                (Page::Details, "nav-details", "12-details.png"),
             ] {
                 cx.update(|cx| handle.update(cx, |_, window, cx| window.click(label, cx)))?;
                 smol::Timer::after(Duration::from_millis(300)).await;
@@ -152,14 +251,17 @@ pub fn start(
                 Ok(())
             })?;
             smol::Timer::after(Duration::from_millis(500)).await;
+            click_inspector_action(handle, "toggle-process-details", &directory, cx).await?;
             cx.update(|cx| -> Result<()> {
                 let app = view.read(cx);
+                ensure!(app.process_details_expanded, "native details toggle did not expand the inspector");
                 ensure!(app.process_details.as_ref().is_some_and(|d| d.pid == std::process::id() && d.command_line.is_some()), "asynchronous own-process details did not arrive: {:?}",app.process_details_error);
-                handle.update(cx, |_, window, cx| window.click("toggle-process-details",cx))?;
+
                 capture(handle,cx,&directory.join("13-selected-details.png"))?;
-                handle.update(cx, |_, window, cx| window.click("verify-file-signature",cx))?;
+
                 Ok(())
             })?;
+            click_inspector_action(handle, "verify-file-signature", &directory, cx).await?;
             let icon_deadline = std::time::Instant::now() + Duration::from_secs(15);
             loop {
                 let icon = cx.update(|cx| view.read(cx).processes.read(cx).delegate().request_process_icon(&std::env::current_exe().unwrap()));
@@ -190,7 +292,7 @@ pub fn start(
                 ensure!(!signature.revocation_checked, "offline signature result incorrectly claims revocation checked");
                 ensure!(signature.file_path == std::env::current_exe()?.canonicalize()?, "signature shown for a different file");
                 capture(handle,cx,&directory.join("13b-file-signature.png"))
-            })?;            cx.update(|cx| handle.update(cx, |_, window, cx| { window.resize(size(px(1380.),px(860.)));window.click("nav-设置",cx); }))?;
+            })?;            cx.update(|cx| handle.update(cx, |_, window, cx| { window.resize(size(px(1380.),px(860.)));window.click("nav-settings",cx); }))?;
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
                 let previous = view.read(cx).settings.always_on_top;
@@ -203,7 +305,7 @@ pub fn start(
                 ensure!(view.read(cx).settings.always_on_top == previous, "topmost setting did not restore");
                 Ok(())
             })?;
-            cx.update(|cx| handle.update(cx, |_, window, cx| window.click("nav-进程", cx)))?;
+            cx.update(|cx| handle.update(cx, |_, window, cx| window.click("nav-processes", cx)))?;
             smol::Timer::after(Duration::from_millis(200)).await;
             cx.update(|cx| -> Result<()> {
                 handle.update(cx, |_, window, cx| {
@@ -234,7 +336,7 @@ pub fn start(
                 ensure!(view.read(cx).processes.read(cx).delegate().group_mode == previous, "application grouping control did not restore");
                 capture(handle,cx,&directory.join("15-application-groups.png"))
             })?;                        cx.update(|cx| handle.update(cx, |_, window, cx| {
-                window.click("nav-端口与连接", cx);
+                window.click("nav-ports", cx);
             }))?;
             let port_deadline = std::time::Instant::now() + Duration::from_secs(15);
             loop {
@@ -325,15 +427,16 @@ pub fn start(
                 let table = app.ports.read(cx).delegate();
                 ensure!(!table.rows.is_empty() && (0..table.rows.len()).all(|row| table.row(row).is_some_and(|entry| entry.pid == std::process::id())),
                     "process context PID query contains another owner's endpoint");
-                handle.update(cx, |_, window, cx| window.click("nav-进程", cx))?;
+                handle.update(cx, |_, window, cx| window.click("nav-processes", cx))?;
                 Ok(())
             })?;
 
             performance = super::qa_performance::measure(handle,view.clone(),cx).await?;
+            languages = super::qa_locales::measure(handle, view.clone(), &directory, cx).await?;
             Ok::<(), anyhow::Error>(())
         }.await.context("native UI smoke");
         let report = match result {
-            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","performance":performance,"executable_icon":icon_source,"checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","real hardware and DirectX capabilities","column chooser open/close","process tree toggle and restore","services","startup","settings","new task dialog","empty command error and cancel","minimum window size","history","Windows sessions","extended process columns","asynchronous command line and architecture","topmost toggle and restoration","native responsiveness measurement","hidden page models stay deferred","navigation catches up to live snapshot","on-demand real file signature","application grouping toggle and restore","real owned TCP/UDP ports and identity","native typed port and PID query","native UDP row context menu","port context action selects captured process","process context action queries captured PID","real executable icon from bounded background worker"]}),
+            Ok::<(), anyhow::Error>(()) => serde_json::json!({"passed":true,"renderer":"Windows D3D11","performance":performance,"languages":languages,"executable_icon":icon_source,"checks":["live telemetry","process table","Ctrl+F and filter","process selection","end task confirmation and cancel","pause/resume","performance navigation","devices navigation","real hardware and DirectX capabilities","column chooser open/close","process tree toggle and restore","services","startup","settings","new task dialog","empty command error and cancel","minimum window size","history","Windows sessions","extended process columns","asynchronous command line and architecture","topmost toggle and restoration","native responsiveness measurement","hidden page models stay deferred","navigation catches up to live snapshot","on-demand real file signature","application grouping toggle and restore","real owned TCP/UDP ports and identity","native typed port and PID query","native UDP row context menu","port context action selects captured process","process context action queries captured PID","real executable icon from bounded background worker", "eight real native language switches, query/identity/width preservation and translated dialogs"]}),
             Err(error) => serde_json::json!({"passed":false,"error":format!("{error:#}")}),
         };
         let _ = std::fs::write(directory.join("ui-report.json"),serde_json::to_vec_pretty(&report).unwrap());
