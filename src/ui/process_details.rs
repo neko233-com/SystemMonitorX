@@ -16,6 +16,10 @@ impl SystemMonitorApp {
         if self.process_details_identity != Some(identity) {
             self.process_details = None;
         }
+        self.file_signature = None;
+        self.file_signature_loading = false;
+        self.file_signature_error = None;
+        self.file_signature_generation = self.file_signature_generation.wrapping_add(1);
         self.process_details_identity = Some(identity);
         self.process_details_loading = true;
         self.process_details_error = None;
@@ -62,6 +66,72 @@ impl SystemMonitorApp {
         cx.notify();
     }
 
+    pub(super) fn verify_selected_signature(&mut self, cx: &mut Context<Self>) {
+        if self.file_signature_loading {
+            return;
+        }
+        let Some(identity) = self.process_details_identity else {
+            return;
+        };
+        self.file_signature_loading = true;
+        self.file_signature = None;
+        self.file_signature_error = None;
+        self.file_signature_generation = self.file_signature_generation.wrapping_add(1);
+        let generation = self.file_signature_generation;
+        cx.spawn(async move |view, cx| {
+            let result = smol::unblock(move || -> anyhow::Result<_> {
+                use anyhow::{Context as _, ensure};
+                let before = ProcessDetails::read(identity.0, identity.1)?;
+                let path = before
+                    .executable_path
+                    .as_deref()
+                    .context("此进程的可执行文件路径不可用")?;
+                let signature = system_monitor_x::file_signature::verify_file_signature(
+                    std::path::Path::new(path),
+                )?;
+                let after = ProcessDetails::read(identity.0, identity.1)?;
+                let after_path = after
+                    .executable_path
+                    .as_deref()
+                    .context("验签后进程文件路径不可用")?;
+                ensure!(
+                    std::path::Path::new(after_path).canonicalize()? == signature.file_path,
+                    "验签期间进程文件路径已变化"
+                );
+                Ok(Arc::new(signature))
+            })
+            .await;
+            let _ = view.update(cx, |this, cx| {
+                if this.process_details_identity != Some(identity)
+                    || this.file_signature_generation != generation
+                {
+                    return;
+                }
+                this.file_signature_loading = false;
+                let still_alive = this.snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.processes.iter().any(|p| {
+                        p.pid == identity.0 && p.start_time_windows_ticks == Some(identity.1)
+                    })
+                });
+                if !still_alive {
+                    this.file_signature = None;
+                    this.file_signature_error =
+                        Some("所选进程已退出或身份已变化，请重新选择".into());
+                } else {
+                    match result {
+                        Ok(signature) => this.file_signature = Some(signature),
+                        Err(error) => {
+                            this.file_signature_error =
+                                Some(format!("文件签名验证不可用：{error:#}"))
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
     pub(super) fn selected_process_details(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(identity) = self.process_details_identity else {
             return div()
@@ -129,6 +199,29 @@ impl SystemMonitorApp {
                     )
                     .when(expanded, |element| {
                         element.child(
+                            Button::new("verify-file-signature")
+                                .small()
+                                .ghost()
+                                .label(if self.file_signature_loading {
+                                    "正在验证签名…"
+                                } else {
+                                    "验证文件签名"
+                                })
+                                .disabled(
+                                    self.file_signature_loading
+                                        || details
+                                            .and_then(|d| d.executable_path.as_ref())
+                                            .is_none(),
+                                )
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| {
+                                        this.verify_selected_signature(cx)
+                                    }),
+                                ),
+                        )
+                    })
+                    .when(expanded, |element| {
+                        element.child(
                             Button::new("refresh-process-details")
                                 .small()
                                 .ghost()
@@ -160,6 +253,57 @@ impl SystemMonitorApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(error.clone()),
                     );
+                }
+                if let Some(error) = self.file_signature_error.as_ref() {
+                    body = body.child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(error.clone()),
+                    );
+                }
+                if let Some(signature) = self.file_signature.as_deref() {
+                    use system_monitor_x::file_signature::{SignatureKind, SignatureStatus};
+                    let status = match signature.status {
+                        SignatureStatus::VerifiedOffline => "本机离线信任验证通过",
+                        SignatureStatus::Unsigned => "未发现嵌入式或本机目录签名",
+                        SignatureStatus::Invalid => "签名无效或文件摘要不匹配",
+                        SignatureStatus::Untrusted => "签名证书链未被信任",
+                        SignatureStatus::Unavailable => "签名验证不可用或不完整",
+                    };
+                    let kind = match signature.signature_kind {
+                        SignatureKind::Embedded => "嵌入式签名",
+                        SignatureKind::Catalog => "本机目录签名",
+                        SignatureKind::None => "无已发现签名",
+                        SignatureKind::Unknown => "未知",
+                    };
+                    body = body
+                        .child(Self::detail_row(
+                            "磁盘文件签名（本次验证）",
+                            format!("{status} · {kind}"),
+                            cx,
+                        ))
+                        .child(Self::detail_row(
+                            "已验证签名发布者",
+                            optional_text(&signature.signer_name),
+                            cx,
+                        ))
+                        .child(
+                            div()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(signature.reason.clone()),
+                        )
+                        .children(signature.issues.iter().map(|issue| {
+                            div()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(issue.clone())
+                        }));
+                    if let Some(timestamp) = &signature.timestamp {
+                        body = body.child(Self::detail_row(
+                            "可信时间戳机构",
+                            optional_text(&timestamp.authority_name),
+                            cx,
+                        ));
+                    }
                 }
                 if let Some(details) = details {
                     let rows = [

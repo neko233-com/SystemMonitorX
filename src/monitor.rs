@@ -19,6 +19,9 @@ use crate::performance::{
     AppHistorySample, HistoryStore, ProcessHistorySample, ProcessPerformanceCollector,
     system_performance,
 };
+use crate::process_groups::{
+    ProcessGroup, WindowSnapshot, build_process_groups, enumerate_visible_windows,
+};
 use crate::sessions::{SessionSample, enumerate_sessions, summarize_sessions};
 
 #[derive(Clone, Debug, Default)]
@@ -124,6 +127,9 @@ pub struct SystemSnapshot {
     pub swap_total: u64,
     pub swap_used: u64,
     pub processes: Vec<ProcessSample>,
+    /// Indices refer to this exact processes vector; built on the collector worker.
+    pub application_groups: Vec<ProcessGroup>,
+    pub application_groups_note: Option<String>,
     pub disks: Vec<DiskSample>,
     pub networks: Vec<NetworkSample>,
     pub temperatures: Vec<TemperatureSample>,
@@ -182,6 +188,8 @@ impl Default for SystemSnapshot {
             swap_total: 0,
             swap_used: 0,
             processes: Vec::new(),
+            application_groups: Vec::new(),
+            application_groups_note: None,
             disks: Vec::new(),
             networks: Vec::new(),
             temperatures: Vec::new(),
@@ -308,6 +316,8 @@ pub struct Monitor {
     sessions_note: Option<String>,
     history: HistoryStore,
     app_history: Vec<AppHistorySample>,
+    window_snapshot: WindowSnapshot,
+    window_refreshed_at: Option<Instant>,
 }
 
 impl Default for Monitor {
@@ -439,6 +449,8 @@ impl Monitor {
             sessions_note,
             history,
             app_history: Vec::new(),
+            window_snapshot: WindowSnapshot::default(),
+            window_refreshed_at: None,
         }
     }
 
@@ -690,6 +702,16 @@ impl Monitor {
                 process.network_transmitted_bytes_per_sec = Some(rate.sent_bytes_per_sec);
             }
         }
+        // Window discovery is read-only and off the UI thread. Cached evidence
+        // is joined to each fresh sample only through exact PID/FILETIME keys.
+        if self
+            .window_refreshed_at
+            .is_none_or(|last| last.elapsed() >= Duration::from_secs(2))
+        {
+            self.window_snapshot = enumerate_visible_windows(&processes);
+            self.window_refreshed_at = Some(Instant::now());
+        }
+        let application_groups = build_process_groups(&processes, &self.window_snapshot);
         summarize_sessions(&mut self.sessions, &processes);
         self.history.update(&processes);
         self.history.observe_network(&process_network);
@@ -891,6 +913,8 @@ impl Monitor {
             swap_total: self.system.total_swap(),
             swap_used: self.system.used_swap(),
             processes,
+            application_groups,
+            application_groups_note: self.window_snapshot.note.clone(),
             disks,
             networks,
             temperatures,

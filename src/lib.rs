@@ -18,3 +18,13 @@ pub mod process_tree;
 pub mod directx;
 
 pub mod update_install;
+
+pub mod file_signature;
+
+pub mod cpu_topology;
+
+pub mod process_groups;
+
+pub mod name_order;
+
+pub mod network_ports;

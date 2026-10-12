@@ -94,7 +94,11 @@ fn matches_query(process: &ProcessSample, query: &str) -> bool {
         .contains(query)
 }
 
-fn validate_live(view: &Entity<SystemMonitorApp>, query: &str, cx: &App) -> Result<(usize, usize)> {
+fn validate_live(
+    view: &Entity<SystemMonitorApp>,
+    query: &str,
+    cx: &App,
+) -> Result<(usize, usize, u64, bool)> {
     let app = view.read(cx);
     ensure!(
         app.page == Page::Processes,
@@ -143,7 +147,12 @@ fn validate_live(view: &Entity<SystemMonitorApp>, query: &str, cx: &App) -> Resu
         expected == visible,
         "visible live process identities differ from expected filter for {query:?}"
     );
-    Ok((snapshot.processes.len(), table.rows.len()))
+    Ok((
+        snapshot.processes.len(),
+        table.rows.len(),
+        table.name_sort_count(),
+        table.name_order_reused(),
+    ))
 }
 
 async fn live_measurement(
@@ -200,7 +209,8 @@ async fn live_measurement(
         })?;
         let render_ms = milliseconds(start);
         // Identity validation is intentionally outside both timed phases.
-        let (process_count, visible_count) = cx.update(|cx| validate_live(view, query, cx))?;
+        let (process_count, visible_count, name_sort_count, name_order_reused) =
+            cx.update(|cx| validate_live(view, query, cx))?;
         dispatch_times.push(dispatch_ms);
         render_times.push(render_ms);
         combined_times.push(dispatch_ms + render_ms);
@@ -222,6 +232,8 @@ async fn live_measurement(
             "key_press_cpu_phase_ms": press_times,
             "real_process_count": process_count,
             "visible_process_count": visible_count,
+            "name_sort_count": name_sort_count,
+            "name_order_reused_from_previous_snapshot": name_order_reused,
             "keyboard_dispatch_and_filter_ms": dispatch_ms,
             "render_frame_cpu_phase_ms": render_ms,
             "combined_cpu_phase_ms": dispatch_ms + render_ms,
@@ -416,6 +428,19 @@ pub(super) async fn measure(
     cx: &mut AsyncApp,
 ) -> Result<Value> {
     let original_page = cx.update(|cx| view.read(cx).page);
+    let original_modes = cx.update(|cx| {
+        let table = view.read(cx).processes.clone();
+        table.update(cx, |table, cx| {
+            let delegate = table.delegate_mut();
+            let modes = (delegate.group_mode, delegate.tree_mode);
+            delegate.group_mode = false;
+            delegate.tree_mode = false;
+            delegate.rebuild();
+            super::tables::sync_selection(table, cx);
+            cx.notify();
+            modes
+        })
+    });
     let measured: Result<Value> = async {
         let live = live_measurement(handle, &view, cx).await?;
         let synthetic = smol::unblock(synthetic_measurement).await?;
@@ -425,9 +450,34 @@ pub(super) async fn measure(
     // Also clear the search when a validation fails. Keeping cleanup outside
     // the measured future prevents `?` from leaving a benchmark query behind.
     let cleanup = restore(handle, &view, original_page, cx);
+    cx.update(|cx| {
+        let table = view.read(cx).processes.clone();
+        table.update(cx, |table, cx| {
+            let delegate = table.delegate_mut();
+            delegate.group_mode = original_modes.0;
+            delegate.tree_mode = original_modes.1;
+            delegate.rebuild();
+            super::tables::sync_selection(table, cx);
+            cx.notify();
+        });
+    });
     match (measured, cleanup) {
         (Ok(mut result), Ok(())) => {
+            cx.update(|cx| -> Result<()> {
+                let table = view.read(cx).processes.read(cx);
+                ensure!(
+                    (table.delegate().group_mode, table.delegate().tree_mode) == original_modes,
+                    "performance view modes were not restored"
+                );
+                ensure!(
+                    table.selected_row() == table.delegate().selected_index(),
+                    "performance cleanup left stale native row selection"
+                );
+                Ok(())
+            })?;
             result["search_cleared_and_original_page_restored"] = json!(true);
+            result["process_view_mode"] =
+                json!("flat; original grouping/tree modes restored after measurement");
             Ok(result)
         }
         (Err(error), Ok(())) => Err(error),

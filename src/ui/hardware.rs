@@ -17,6 +17,26 @@ fn number(value: Option<u32>, suffix: &str) -> String {
         .map(|n| format!("{n}{suffix}"))
         .unwrap_or_else(|| "—".into())
 }
+fn affinity_text(values: &[system_monitor_x::cpu_topology::ProcessorAffinity]) -> String {
+    values
+        .iter()
+        .map(|affinity| {
+            let processors = affinity
+                .logical_processor_numbers()
+                .into_iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("组 {}：CPU {processors}", affinity.group)
+        })
+        .collect::<Vec<_>>()
+        .join("；")
+}
+fn boolean(value: Option<bool>, yes: &str, no: &str) -> String {
+    value
+        .map(|value| if value { yes } else { no }.to_owned())
+        .unwrap_or_else(|| "—".into())
+}
 fn section(title: impl Into<String>, rows: Vec<(String, String)>) -> HardwareSection {
     HardwareSection {
         title: title.into(),
@@ -37,6 +57,235 @@ fn build_sections(h: &HardwareInventory) -> Vec<HardwareSection> {
                     format!("{} · {}", text(&system.manufacturer), text(&system.model)),
                 ),
                 ("系统架构".into(), text(&system.system_type)),
+            ],
+        ));
+    }
+    if let Some(topology) = &h.cpu_topology {
+        let mut rows = vec![
+            (
+                "拓扑读取状态".into(),
+                if topology.complete {
+                    "完整"
+                } else {
+                    "部分可用"
+                }
+                .into(),
+            ),
+            (
+                "物理插槽 / 核心 / 逻辑处理器".into(),
+                format!(
+                    "{} / {} / {}",
+                    topology.packages.len(),
+                    topology.cores.len(),
+                    number(topology.logical_processor_count, "")
+                ),
+            ),
+            (
+                "NUMA 节点 / 活跃处理器组".into(),
+                format!(
+                    "{} / {}",
+                    topology.numa_nodes.len(),
+                    number(topology.active_group_count.map(u32::from), "")
+                ),
+            ),
+            (
+                "启用 SMT 的核心".into(),
+                topology
+                    .cores
+                    .iter()
+                    .filter(|core| core.smt)
+                    .count()
+                    .to_string(),
+            ),
+        ];
+        let mut classes = std::collections::BTreeMap::<u8, usize>::new();
+        for core in &topology.cores {
+            *classes.entry(core.efficiency_class).or_default() += 1;
+        }
+        rows.push((
+            "Windows 性能 / 能效类（原值）".into(),
+            classes
+                .into_iter()
+                .map(|(class, count)| format!("类 {class}：{count} 核心"))
+                .collect::<Vec<_>>()
+                .join("；"),
+        ));
+        for group in &topology.groups {
+            rows.push((
+                format!("处理器组 {}", group.number),
+                format!(
+                    "{} 活跃 / {} 上限 · 掩码 0x{:X}",
+                    group.active_processor_count,
+                    group.maximum_processor_count,
+                    group.active_processor_mask
+                ),
+            ));
+        }
+        for node in &topology.numa_nodes {
+            rows.push((
+                format!("NUMA {}", node.node_number),
+                affinity_text(&node.affinities),
+            ));
+        }
+        for package in &topology.packages {
+            rows.push((
+                format!("物理插槽 {}", package.index),
+                affinity_text(&package.affinities),
+            ));
+        }
+        sections.push(section("CPU 原生拓扑", rows));
+        sections.push(section(
+            "CPU 核心与逻辑处理器",
+            topology
+                .cores
+                .iter()
+                .map(|core| {
+                    (
+                        format!(
+                            "核心 {} · 插槽 {}",
+                            core.index,
+                            number(core.package_index, "")
+                        ),
+                        format!(
+                            "{} · 类 {} · {}",
+                            if core.smt { "SMT" } else { "单线程核心" },
+                            core.efficiency_class,
+                            affinity_text(&core.affinities)
+                        ),
+                    )
+                })
+                .collect(),
+        ));
+        sections.push(section(
+            "CPU 原生缓存",
+            topology
+                .caches
+                .iter()
+                .map(|cache| {
+                    (
+                        format!("L{} {} · #{}", cache.level, cache.kind, cache.index),
+                        format!(
+                            "{} · 缓存行 {} B · {} · {}",
+                            bytes(cache.size_bytes),
+                            cache.line_size_bytes,
+                            match cache.associativity {
+                                0 => "相联度未提供".to_owned(),
+                                255 => "全相联".to_owned(),
+                                value => format!("{value} 路相联"),
+                            },
+                            affinity_text(&cache.affinities)
+                        ),
+                    )
+                })
+                .collect(),
+        ));
+        if !topology.dies.is_empty() {
+            sections.push(section(
+                "CPU 晶粒",
+                topology
+                    .dies
+                    .iter()
+                    .map(|die| {
+                        (
+                            format!("晶粒 {}", die.index),
+                            affinity_text(&die.affinities),
+                        )
+                    })
+                    .collect(),
+            ));
+        }
+        if !topology.modules.is_empty() {
+            sections.push(section(
+                "CPU 模块",
+                topology
+                    .modules
+                    .iter()
+                    .map(|module| {
+                        (
+                            format!("模块 {}", module.index),
+                            affinity_text(&module.affinities),
+                        )
+                    })
+                    .collect(),
+            ));
+        }
+    }
+    if let Some(power) = &h.power_status {
+        sections.push(section(
+            "电源与电池",
+            vec![
+                (
+                    "外接电源".into(),
+                    boolean(power.ac_online, "已连接", "未连接"),
+                ),
+                (
+                    "系统电池".into(),
+                    boolean(power.battery_present, "已检测到", "无系统电池"),
+                ),
+                (
+                    "电量".into(),
+                    power
+                        .battery_percent
+                        .map(|value| format!("{value}%"))
+                        .unwrap_or_else(|| "—".into()),
+                ),
+                (
+                    "充电 / 节电模式".into(),
+                    format!(
+                        "{} / {}",
+                        boolean(power.charging, "充电中", "未充电"),
+                        boolean(power.battery_saver, "已启用", "未启用")
+                    ),
+                ),
+                (
+                    "预计剩余续航".into(),
+                    power
+                        .remaining_seconds
+                        .map(|value| duration(u64::from(value)))
+                        .unwrap_or_else(|| "—".into()),
+                ),
+                ("状态刷新".into(), "随设备信息刷新；可手动重新读取".into()),
+            ],
+        ));
+    }
+    for battery in &h.batteries {
+        sections.push(section(
+            format!("电池 · {}", battery.device_id),
+            vec![
+                ("名称 / 型号".into(), text(&battery.name)),
+                (
+                    "化学类型 / 状态".into(),
+                    format!("{} / {}", text(&battery.chemistry), text(&battery.status)),
+                ),
+                (
+                    "电量".into(),
+                    battery
+                        .estimated_charge_percent
+                        .map(|value| format!("{value}%"))
+                        .unwrap_or_else(|| "—".into()),
+                ),
+                (
+                    "设计容量 / 满充容量".into(),
+                    format!(
+                        "{} / {}",
+                        battery
+                            .design_capacity_mwh
+                            .map(|value| format!("{value} mWh"))
+                            .unwrap_or_else(|| "—".into()),
+                        battery
+                            .full_charge_capacity_mwh
+                            .map(|value| format!("{value} mWh"))
+                            .unwrap_or_else(|| "—".into())
+                    ),
+                ),
+                (
+                    "设计电压".into(),
+                    battery
+                        .design_voltage_mv
+                        .map(|value| format!("{value} mV"))
+                        .unwrap_or_else(|| "—".into()),
+                ),
+                ("设备标识".into(), text(&battery.pnp_device_id)),
             ],
         ));
     }

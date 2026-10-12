@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$taskRequiredPayloadFiles = @('SystemMonitorX.exe', 'SystemMonitorXUpdate.exe', 'LICENSE', 'README.md')
+$taskRequiredPayloadFiles = @('SystemMonitorX.exe', 'SystemMonitorXUpdate.exe', 'LICENSE', 'README.md', 'README.zh-CN.md', 'Install-SystemMonitorX.ps1')
 
 function Assert-ExitCode([string]$Operation) {
     if ($LASTEXITCODE -ne 0) { throw "$Operation failed (exit $LASTEXITCODE)." }
@@ -42,6 +42,11 @@ try {
         . (Join-Path $PSScriptRoot 'Enter-DevEnvironment.ps1')
         & cargo fmt --all -- --check
         Assert-ExitCode 'Rust formatting'
+        $taskInstallSelfTest = & (Join-Path $PSScriptRoot 'Install-SystemMonitorX.ps1') -SelfTest
+        if ($taskInstallSelfTest.Status -ne 'SelfTestPassed' -or $taskInstallSelfTest.Checks -lt 16) {
+            throw 'PowerShell installer self-tests did not pass.'
+        }
+        Write-Host "PowerShell installer self-tests passed ($($taskInstallSelfTest.Checks) checks)."
         & cargo clippy --all-targets --locked --features ui-test -- -D warnings
         Assert-ExitCode 'Clippy'
         & cargo test --all-targets --locked --features ui-test

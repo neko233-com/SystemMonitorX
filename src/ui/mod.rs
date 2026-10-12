@@ -1,8 +1,11 @@
 mod columns;
+mod developer_actions;
 mod directx;
 mod hardware;
 mod management;
+mod ports;
 mod process_details;
+mod process_icons;
 #[cfg(feature = "ui-test")]
 mod qa;
 #[cfg(feature = "ui-test")]
@@ -51,6 +54,7 @@ gpui_kit::actions!(
 enum Page {
     Processes,
     Details,
+    Ports,
     Performance,
     History,
     Users,
@@ -64,6 +68,7 @@ impl Page {
         match self {
             Self::Processes => "进程",
             Self::Details => "详细信息",
+            Self::Ports => "端口与连接",
             Self::Performance => "性能",
             Self::History => "应用历史",
             Self::Users => "用户",
@@ -77,6 +82,7 @@ impl Page {
         match self {
             Self::Processes => UiIcon::Layers,
             Self::Details => UiIcon::Layers,
+            Self::Ports => UiIcon::Network,
             Self::Performance => UiIcon::Activity,
             Self::History => UiIcon::Activity,
             Self::Users => UiIcon::Shield,
@@ -96,6 +102,7 @@ struct Settings {
     auto_updates: bool,
     always_on_top: bool,
     hidden_process_columns: Vec<usize>,
+    group_processes: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -105,6 +112,7 @@ impl Default for Settings {
             auto_updates: true,
             always_on_top: false,
             hidden_process_columns: Vec::new(),
+            group_processes: true,
         }
     }
 }
@@ -157,6 +165,9 @@ pub struct SystemMonitorApp {
     slot: SnapshotSlot,
     collector_commands: std::sync::mpsc::SyncSender<CollectorCommand>,
     last_seq: u64,
+    process_display_seq: Option<u64>,
+    users_display_seq: Option<u64>,
+    history_display_seq: Option<u64>,
     stopped: Arc<AtomicBool>,
     interval: Arc<AtomicU64>,
     paused: bool,
@@ -168,6 +179,10 @@ pub struct SystemMonitorApp {
     startup: Entity<TableState<TextTable>>,
     users: Entity<TableState<TextTable>>,
     app_history: Entity<TableState<TextTable>>,
+    ports: Entity<TableState<ports::PortsTable>>,
+    ports_snapshot: Option<Arc<system_monitor_x::network_ports::PortSnapshot>>,
+    ports_loading: bool,
+    ports_last_refresh: Option<std::time::Instant>,
     service_entries: Vec<platform::ServiceInfo>,
     startup_entries: Vec<platform::StartupEntry>,
     history: VecDeque<HistoryPoint>,
@@ -193,6 +208,10 @@ pub struct SystemMonitorApp {
     process_details_identity: Option<(u32, u64)>,
     process_details_expanded: bool,
     process_details_generation: u64,
+    file_signature: Option<Arc<system_monitor_x::file_signature::FileSignature>>,
+    file_signature_loading: bool,
+    file_signature_error: Option<String>,
+    file_signature_generation: u64,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _poll: Task<()>,
@@ -258,9 +277,16 @@ impl SystemMonitorApp {
             cx.new(|cx| InputState::new(window, cx).placeholder("搜索进程名称、路径或 PID"));
         let task_input = cx
             .new(|cx| InputState::new(window, cx).placeholder("例如 notepad.exe 或可执行文件路径"));
+        let process_action_parent = cx.entity().downgrade();
         let processes = cx.new(|cx| {
             let mut delegate = ProcessTable::new();
             delegate.set_hidden_columns(&settings.hidden_process_columns);
+            delegate.group_mode = settings.group_processes;
+            delegate.set_action_handler(move |request, window, cx| {
+                let _ = process_action_parent.update(cx, |this: &mut SystemMonitorApp, cx| {
+                    this.handle_process_action(request, window, cx)
+                });
+            });
             TableState::new(delegate, window, cx)
                 .col_selectable(false)
                 .col_movable(false)
@@ -288,7 +314,8 @@ impl SystemMonitorApp {
                     ("状态", 100.),
                     ("命令 / 路径", 610.),
                     ("来源", 260.),
-                ]),
+                ])
+                .stable_identity_columns(&[2, 3]),
                 window,
                 cx,
             )
@@ -307,7 +334,8 @@ impl SystemMonitorApp {
                     ("GPU", 95.),
                     ("客户端 / 协议", 230.),
                 ])
-                .numeric_columns(&[1, 3, 4, 5, 6]),
+                .numeric_columns(&[1, 3, 4, 5, 6])
+                .stable_identity_columns(&[1]),
                 window,
                 cx,
             )
@@ -326,13 +354,44 @@ impl SystemMonitorApp {
                     ("实例 / 活跃", 125.),
                     ("路径", 650.),
                 ])
-                .numeric_columns(&[1, 2, 3, 4, 5, 6]),
+                .numeric_columns(&[1, 2, 3, 4, 5, 6])
+                .stable_identity_columns(&[8]),
                 window,
                 cx,
             )
             .col_selectable(false)
         });
+        let ports = cx.new(|cx| {
+            TableState::new(ports::PortsTable::new(), window, cx)
+                .col_selectable(false)
+                .col_movable(false)
+        });
         let subscriptions = vec![
+            cx.subscribe(&ports, |_, table, event: &TableEvent, cx| match event {
+                TableEvent::SelectRow(row) | TableEvent::DoubleClickedRow(row) => {
+                    if table.read(cx).selected_row() == Some(*row) {
+                        table.update(cx, |table, _| table.delegate_mut().select_row(Some(*row)));
+                    }
+                }
+                TableEvent::ClearSelection => {
+                    if table.read(cx).selected_row().is_none() {
+                        table.update(cx, |table, _| table.delegate_mut().select_row(None));
+                    }
+                }
+                TableEvent::ColumnWidthsChanged(widths) => {
+                    table.update(cx, |table, _| {
+                        table.delegate_mut().set_column_widths(widths)
+                    });
+                }
+                _ => {}
+            }),
+            cx.subscribe_in(
+                &ports,
+                window,
+                |this, _, event: &ports::PortMenuEvent, window, cx| {
+                    this.handle_port_action(event.clone(), window, cx);
+                },
+            ),
             cx.subscribe_in(&search, window, |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.filter(cx);
@@ -342,6 +401,9 @@ impl SystemMonitorApp {
             cx.subscribe(&processes, |this, table, event: &TableEvent, cx| {
                 match event {
                     TableEvent::SelectRow(i) | TableEvent::DoubleClickedRow(i) => {
+                        if table.read(cx).selected_row() != Some(*i) {
+                            return;
+                        }
                         let id = table
                             .read(cx)
                             .delegate()
@@ -358,11 +420,19 @@ impl SystemMonitorApp {
                         table.update(cx, |t, _| t.delegate_mut().set_column_widths(widths));
                     }
                     TableEvent::ClearSelection => {
+                        if table.read(cx).selected_row().is_some() {
+                            return;
+                        }
                         table.update(cx, |t, _| t.delegate_mut().selected = None);
                         this.process_details_identity = None;
                         this.process_details = None;
                         this.process_details_error = None;
                         this.process_details_loading = false;
+                        this.file_signature = None;
+                        this.file_signature_loading = false;
+                        this.file_signature_error = None;
+                        this.file_signature_generation =
+                            this.file_signature_generation.wrapping_add(1);
                     }
                     _ => {}
                 }
@@ -403,6 +473,9 @@ impl SystemMonitorApp {
             slot,
             collector_commands,
             last_seq: 0,
+            process_display_seq: None,
+            users_display_seq: None,
+            history_display_seq: None,
             stopped,
             interval,
             paused: false,
@@ -414,6 +487,10 @@ impl SystemMonitorApp {
             startup,
             users,
             app_history,
+            ports,
+            ports_snapshot: None,
+            ports_loading: false,
+            ports_last_refresh: None,
             service_entries: vec![],
             startup_entries: vec![],
             history: VecDeque::new(),
@@ -439,6 +516,10 @@ impl SystemMonitorApp {
             process_details_identity: None,
             process_details_expanded: false,
             process_details_generation: 0,
+            file_signature: None,
+            file_signature_loading: false,
+            file_signature_error: None,
+            file_signature_generation: 0,
             focus_handle,
             _subscriptions: subscriptions,
             _poll: poll,
@@ -491,8 +572,27 @@ impl SystemMonitorApp {
                 _ => {}
             }
         }
+        if matches!(self.page, Page::Processes | Page::Details)
+            && self.processes.update(cx, |table, cx| {
+                let changed = table.delegate_mut().poll_icon_updates();
+                if changed {
+                    cx.notify();
+                }
+                changed
+            })
+        {
+            cx.notify();
+        }
         if self.paused {
             return;
+        }
+        if self.page == Page::Ports
+            && !self.ports_loading
+            && self
+                .ports_last_refresh
+                .is_none_or(|instant| instant.elapsed() >= Duration::from_secs(2))
+        {
+            self.refresh_ports(cx);
         }
         let next = self.slot.lock().ok().and_then(|s| s.clone());
         let Some((seq, snapshot)) = next else {
@@ -517,90 +617,111 @@ impl SystemMonitorApp {
                 self.history.pop_front();
             }
         }
-        self.processes.update(cx, |table, cx| {
-            let d = table.delegate_mut();
-            d.set_snapshot(snapshot.clone());
-            tables::sync_selection(table, cx);
-            cx.notify();
-        });
-        self.users.update(cx, |table, cx| {
-            let selected = table
-                .selected_row()
-                .and_then(|i| table.delegate().rows.get(i))
-                .and_then(|r| r.get(1))
-                .cloned();
-            let d = table.delegate_mut();
-            d.all = snapshot
-                .sessions
-                .iter()
-                .filter(|s| s.user_name.as_ref().is_some_and(|u| !u.is_empty()))
-                .map(|s| {
-                    vec![
-                        format!(
-                            "{}\\{}",
-                            s.domain.as_deref().unwrap_or(""),
-                            s.user_name.as_deref().unwrap_or("")
-                        ),
-                        s.id.to_string(),
-                        s.state.clone(),
-                        s.process_count.to_string(),
-                        format!("{:.1}%", s.cpu_usage),
-                        bytes(s.memory_bytes),
-                        percent(s.gpu_usage),
-                        format!(
-                            "{} · {}",
-                            s.client_name.as_deref().unwrap_or("本机"),
-                            s.protocol.as_deref().unwrap_or("—")
-                        ),
-                    ]
-                })
-                .collect();
-            d.rebuild();
-            if let Some(id) = selected {
-                let next = d.rows.iter().position(|r| r[1] == id);
-                if let Some(next) = next {
-                    table.set_selected_row(next, cx)
-                } else {
-                    table.clear_selection(cx)
-                }
-            }
-            cx.notify();
-        });
-        self.app_history.update(cx, |table, cx| {
-            let d = table.delegate_mut();
-            d.all = snapshot
-                .app_history
-                .iter()
-                .map(|h| {
-                    vec![
-                        h.name.clone(),
-                        h.cpu_seconds
-                            .map(|n| format!("{n:.2} s"))
-                            .unwrap_or_else(|| "—".into()),
-                        h.read_bytes.map(bytes).unwrap_or_else(|| "—".into()),
-                        h.write_bytes.map(bytes).unwrap_or_else(|| "—".into()),
-                        h.network_received_bytes
-                            .map(bytes)
-                            .unwrap_or_else(|| "—".into()),
-                        h.network_transmitted_bytes
-                            .map(bytes)
-                            .unwrap_or_else(|| "—".into()),
-                        h.network_covered_seconds
-                            .map(|n| format!("{n:.1} s"))
-                            .unwrap_or_else(|| "—".into()),
-                        format!("{} / {}", h.process_instances, h.running_instances),
-                        h.exe
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "—".into()),
-                    ]
-                })
-                .collect();
-            d.rebuild();
-            cx.notify();
-        });
         self.snapshot = Some(snapshot);
+        self.refresh_visible_snapshot(cx);
         cx.notify();
+    }
+    /// Only the visible page builds its presentation model. The collector and
+    /// chart/history sampling continue independently; navigation catches up to
+    /// the latest immutable snapshot, including while display is paused.
+    fn refresh_visible_snapshot(&mut self, cx: &mut Context<Self>) {
+        let Some(snapshot) = self.snapshot.clone() else {
+            return;
+        };
+        let seq = self.last_seq;
+        if matches!(self.page, Page::Processes | Page::Details)
+            && self.process_display_seq != Some(seq)
+        {
+            self.processes.update(cx, |table, cx| {
+                let d = table.delegate_mut();
+                d.set_snapshot(snapshot.clone());
+                tables::sync_selection(table, cx);
+                cx.notify();
+            });
+            self.process_display_seq = Some(seq);
+        }
+        if self.page == Page::Users && self.users_display_seq != Some(seq) {
+            self.users.update(cx, |table, cx| {
+                let selected = table
+                    .selected_row()
+                    .and_then(|i| table.delegate().rows.get(i))
+                    .and_then(|r| r.get(1))
+                    .cloned();
+                let d = table.delegate_mut();
+                d.all = snapshot
+                    .sessions
+                    .iter()
+                    .filter(|s| s.user_name.as_ref().is_some_and(|u| !u.is_empty()))
+                    .map(|s| {
+                        vec![
+                            format!(
+                                "{}\\{}",
+                                s.domain.as_deref().unwrap_or(""),
+                                s.user_name.as_deref().unwrap_or("")
+                            ),
+                            s.id.to_string(),
+                            s.state.clone(),
+                            s.process_count.to_string(),
+                            format!("{:.1}%", s.cpu_usage),
+                            bytes(s.memory_bytes),
+                            percent(s.gpu_usage),
+                            format!(
+                                "{} · {}",
+                                s.client_name.as_deref().unwrap_or("本机"),
+                                s.protocol.as_deref().unwrap_or("—")
+                            ),
+                        ]
+                    })
+                    .collect();
+                d.rebuild();
+                if let Some(id) = selected {
+                    let next = d.rows.iter().position(|r| r[1] == id);
+                    if let Some(next) = next {
+                        table.set_selected_row(next, cx)
+                    } else {
+                        table.clear_selection(cx)
+                    }
+                }
+                cx.notify();
+            });
+            self.users_display_seq = Some(seq);
+        }
+        if self.page == Page::History && self.history_display_seq != Some(seq) {
+            self.app_history.update(cx, |table, cx| {
+                let d = table.delegate_mut();
+                d.all = snapshot
+                    .app_history
+                    .iter()
+                    .map(|h| {
+                        vec![
+                            h.name.clone(),
+                            h.cpu_seconds
+                                .map(|n| format!("{n:.2} s"))
+                                .unwrap_or_else(|| "—".into()),
+                            h.read_bytes.map(bytes).unwrap_or_else(|| "—".into()),
+                            h.write_bytes.map(bytes).unwrap_or_else(|| "—".into()),
+                            h.network_received_bytes
+                                .map(bytes)
+                                .unwrap_or_else(|| "—".into()),
+                            h.network_transmitted_bytes
+                                .map(bytes)
+                                .unwrap_or_else(|| "—".into()),
+                            h.network_covered_seconds
+                                .map(|n| format!("{n:.1} s"))
+                                .unwrap_or_else(|| "—".into()),
+                            format!("{} / {}", h.process_instances, h.running_instances),
+                            h.exe
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "—".into()),
+                        ]
+                    })
+                    .collect();
+                d.rebuild();
+                cx.notify();
+            });
+            self.history_display_seq = Some(seq);
+        }
     }
     fn filter(&mut self, cx: &mut Context<Self>) {
         let query = self.search.read(cx).value().to_string();
@@ -616,6 +737,15 @@ impl SystemMonitorApp {
                 if !t.delegate().rows.is_empty() {
                     t.scroll_to_row(0, cx);
                 }
+                cx.notify();
+            });
+            return;
+        }
+        if self.page == Page::Ports {
+            self.ports.update(cx, |table, cx| {
+                table.delegate_mut().set_query(&query);
+                table.scroll_to_row(0, cx);
+                table.clear_selection(cx);
                 cx.notify();
             });
             return;
@@ -641,14 +771,25 @@ impl SystemMonitorApp {
     }
     fn set_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
-        self.processes.update(cx, |table, cx| {
-            table.delegate_mut().detailed = page == Page::Details;
-            table.refresh(cx);
-        });
+        if matches!(page, Page::Processes | Page::Details) {
+            self.processes.update(cx, |table, cx| {
+                let detailed = page == Page::Details;
+                if table.delegate().detailed != detailed {
+                    table.delegate_mut().detailed = detailed;
+                    table.delegate_mut().rebuild();
+                    tables::sync_selection(table, cx);
+                }
+                table.refresh(cx);
+            });
+        }
         self.search.update(cx, |s, cx| s.set_value("", window, cx));
         // Programmatic InputState::set_value does not emit InputEvent::Change.
         // Reset the newly visible model; hidden pages are not searched on each key.
         self.filter(cx);
+        self.refresh_visible_snapshot(cx);
+        if page == Page::Ports {
+            self.refresh_ports(cx);
+        }
         cx.notify();
     }
     fn refresh_metadata(&mut self, cx: &mut Context<Self>) {
@@ -846,6 +987,27 @@ impl SystemMonitorApp {
         let Some(p) = self.processes.read(cx).delegate().selection().cloned() else {
             return;
         };
+        let delegate = self.processes.read(cx).delegate();
+        if let Some(reason) = delegate.selected_application_unavailable_reason() {
+            self.message = Some(reason);
+            cx.notify();
+            return;
+        }
+        if let Some(targets) = delegate.selected_application_targets() {
+            let count = targets.len();
+            self.confirm_management(
+                "结束应用",
+                format!("结束 {} 的 {count} 个已列出进程？未保存的数据可能丢失。确认期间新建的进程不在本次范围内。", p.name),
+                true,
+                move || {
+                    let ended = platform::terminate_application_processes(&targets)?;
+                    Ok(format!("已结束应用的 {} 个进程", ended.len()))
+                },
+                w,
+                cx,
+            );
+            return;
+        }
         let view = cx.entity().downgrade();
         w.open_alert_dialog(cx, move |dialog, _, _| {
             dialog
@@ -884,6 +1046,10 @@ impl SystemMonitorApp {
         });
     }
     fn export_csv(&mut self, _: &ExportCsv, _: &mut Window, cx: &mut Context<Self>) {
+        if self.page == Page::Ports {
+            self.export_ports(cx);
+            return;
+        }
         let Some(snapshot) = self.snapshot.clone() else {
             return;
         };
@@ -962,6 +1128,7 @@ impl SystemMonitorApp {
                             Page::Devices,
                             Page::Users,
                             Page::Details,
+                            Page::Ports,
                             Page::Services,
                             Page::Startup,
                         ]
@@ -1090,18 +1257,29 @@ impl SystemMonitorApp {
             .min_h_0()
             .child(
                 h_flex()
-                    .h(px(50.))
+                    .min_h(px(50.))
+                    .py_2()
+                    .flex_wrap()
+                    .gap_2()
                     .px_6()
                     .justify_between()
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} 个进程 · 点击列标题排序", table.rows.len())),
+                            .child(format!(
+                                "{} 个进程 · {} 行",
+                                self.snapshot
+                                    .as_ref()
+                                    .map(|s| s.processes.len())
+                                    .unwrap_or(table.rows.len()),
+                                table.rows.len()
+                            )),
                     )
                     .child(
                         h_flex()
                             .gap_2()
+                            .flex_wrap()
                             .child(
                                 Button::new("process-columns")
                                     .ghost()
@@ -1112,11 +1290,41 @@ impl SystemMonitorApp {
                                     })),
                             )
                             .child(
+                                Button::new("application-groups")
+                                    .ghost()
+                                    .small()
+                                    .label(
+                                        if self.processes.read(cx).delegate().group_mode
+                                            && !self.processes.read(cx).delegate().tree_mode
+                                        {
+                                            "应用分组 ✓"
+                                        } else {
+                                            "应用分组"
+                                        },
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let enabled = this.processes.update(cx, |table, cx| {
+                                            let delegate = table.delegate_mut();
+                                            delegate.group_mode =
+                                                !delegate.group_mode || delegate.tree_mode;
+                                            delegate.tree_mode = false;
+                                            let enabled = delegate.group_mode;
+                                            delegate.rebuild();
+                                            tables::sync_selection(table, cx);
+                                            cx.notify();
+                                            enabled
+                                        });
+                                        this.settings.group_processes = enabled;
+                                        let _ = this.settings_writer.send(this.settings.clone());
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
                                 Button::new("tree-mode")
                                     .ghost()
                                     .small()
                                     .label(if table.tree_mode {
-                                        "列表视图"
+                                        "退出进程树"
                                     } else {
                                         "进程树"
                                     })
@@ -1994,6 +2202,7 @@ impl Render for SystemMonitorApp {
                                         | Page::Startup
                                         | Page::Users
                                         | Page::History
+                                        | Page::Ports
                                 ),
                                 |e| {
                                     e.child(
@@ -2093,6 +2302,7 @@ impl Render for SystemMonitorApp {
                     .child(
                         div().flex_1().min_h_0().child(match self.page {
                             Page::Processes | Page::Details => self.process_view(cx),
+                            Page::Ports => self.ports_view(cx),
                             Page::Users => self.users_view(cx),
                             Page::History => self.app_history_view(cx),
                             Page::Performance => self.performance(cx),

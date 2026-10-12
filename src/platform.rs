@@ -544,6 +544,36 @@ pub fn terminate_process(pid: u32, expected_start_time: u64) -> Result<()> {
         .context("结束进程失败：可能受到系统保护或需要管理员权限")
 }
 
+/// Ends exactly the confirmed application members. Every native handle and
+/// exact FILETIME is verified before the first mutation. New descendants are
+/// deliberately outside this confirmed snapshot; no PID-only lookup is used.
+pub fn terminate_application_processes(identities: &[(u32, u64)]) -> Result<Vec<u32>> {
+    ensure!(
+        !identities.is_empty() && identities.len() <= 65_536,
+        "应用进程列表为空或超过安全上限"
+    );
+    let mut unique = std::collections::HashSet::with_capacity(identities.len());
+    for &(pid, ticks) in identities {
+        ensure!(
+            ticks >= 116_444_736_000_000_000 && unique.insert(pid),
+            "应用包含不可验证或重复的进程身份，未结束任何进程"
+        );
+    }
+    let mut targets = Vec::with_capacity(identities.len());
+    for &(pid, ticks) in identities {
+        let handle = verified_process(pid, ticks, PROCESS_TERMINATE)
+            .with_context(|| format!("无法验证应用成员 PID {pid}，未结束任何进程"))?;
+        targets.push((pid, handle));
+    }
+    let mut terminated = Vec::with_capacity(targets.len());
+    for (pid, handle) in targets.into_iter().rev() {
+        unsafe { TerminateProcess(handle.0, 1) }.with_context(|| {
+            format!("结束应用成员 PID {pid} 失败；已经结束的 PID：{terminated:?}")
+        })?;
+        terminated.push(pid);
+    }
+    Ok(terminated)
+}
 pub fn set_priority(pid: u32, expected_start_time: u64, priority: Priority) -> Result<()> {
     let process = verified_process(pid, expected_start_time, PROCESS_SET_INFORMATION)?;
     let class = match priority {
@@ -1285,6 +1315,82 @@ mod tests {
         assert_eq!(approval_enabled(&ApprovalSnapshot::Unreadable), None);
     }
 
+    #[test]
+    fn application_end_validates_all_exact_handles_before_ending_owned_members() -> Result<()> {
+        use std::os::windows::{io::AsRawHandle, process::CommandExt};
+        struct OwnedChildren(Vec<std::process::Child>);
+        impl Drop for OwnedChildren {
+            fn drop(&mut self) {
+                for child in &mut self.0 {
+                    if child.try_wait().ok().flatten().is_none() {
+                        let _ = child.kill();
+                    }
+                    let _ = child.wait();
+                }
+            }
+        }
+        let mut directory = vec![0u16; 32_768];
+        let count = unsafe {
+            windows::Win32::System::SystemInformation::GetSystemDirectoryW(Some(&mut directory))
+        } as usize;
+        ensure!(
+            count > 0 && count < directory.len(),
+            "system directory unavailable"
+        );
+        let cmd = PathBuf::from(String::from_utf16(&directory[..count])?).join("cmd.exe");
+        let mut children = OwnedChildren(Vec::new());
+        for _ in 0..2 {
+            children.0.push(
+                Command::new(&cmd)
+                    .args([
+                        "/D",
+                        "/Q",
+                        "/C",
+                        "set /p SystemMonitorXApplicationTestWait=",
+                    ])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .creation_flags(threading::CREATE_NO_WINDOW.0)
+                    .spawn()?,
+            );
+        }
+        let identities = children
+            .0
+            .iter()
+            .map(|child| {
+                let ticks = creation_ticks(HANDLE(child.as_raw_handle()))?;
+                Ok((child.id(), ticks))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut stale = identities.clone();
+        stale[1].1 += 1;
+        assert!(terminate_application_processes(&stale).is_err());
+        assert!(
+            children
+                .0
+                .iter_mut()
+                .all(|child| child.try_wait().unwrap().is_none()),
+            "an invalid second member must leave both owned processes running"
+        );
+        assert!(terminate_application_processes(&[identities[0], identities[0]]).is_err());
+        assert!(
+            children
+                .0
+                .iter_mut()
+                .all(|child| child.try_wait().unwrap().is_none()),
+            "duplicate identity must cause no mutation"
+        );
+        let mut ended = terminate_application_processes(&identities)?;
+        ended.sort_unstable();
+        let mut expected: Vec<_> = identities.iter().map(|entry| entry.0).collect();
+        expected.sort_unstable();
+        assert_eq!(ended, expected);
+        for child in &mut children.0 {
+            assert_eq!(child.wait()?.code(), Some(1));
+        }
+        Ok(())
+    }
     struct RegistryFixture(String);
     impl Drop for RegistryFixture {
         fn drop(&mut self) {

@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use std::time::{Instant, SystemTime};
 
 use anyhow::{Context, Result};
+use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use wmi::{Variant, WMIConnection};
+
+use crate::cpu_topology::CpuTopology;
 
 #[derive(Clone, Debug, Default)]
 pub struct SystemHardware {
@@ -136,6 +139,91 @@ pub struct MonitorHardware {
     pub manufacture_year: Option<u32>,
 }
 
+/// Snapshot from GetSystemPowerStatus, refreshed with the hardware inventory.
+/// Unknown sentinel values and absent batteries are never shown as zero charge.
+#[derive(Clone, Debug, Default)]
+pub struct SystemPowerStatus {
+    pub ac_online: Option<bool>,
+    pub battery_present: Option<bool>,
+    pub battery_percent: Option<u8>,
+    pub charging: Option<bool>,
+    pub battery_low: Option<bool>,
+    pub battery_critical: Option<bool>,
+    pub battery_saver: Option<bool>,
+    pub remaining_seconds: Option<u32>,
+    pub full_life_seconds: Option<u32>,
+    pub raw_ac_line_status: u8,
+    pub raw_battery_flags: u8,
+    pub raw_battery_life_percent: u8,
+}
+
+impl SystemPowerStatus {
+    pub fn collect() -> Result<Self> {
+        let mut raw = SYSTEM_POWER_STATUS::default();
+        // SAFETY: raw is a writable Win32 structure with its documented layout.
+        unsafe { GetSystemPowerStatus(&mut raw) }.context("读取系统电源状态失败")?;
+        Ok(Self::from_raw(&raw))
+    }
+
+    fn from_raw(raw: &SYSTEM_POWER_STATUS) -> Self {
+        let ac_online = match raw.ACLineStatus {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        };
+        let battery_present =
+            if raw.BatteryFlag == 255 || raw.BatteryFlag & !(1 | 2 | 4 | 8 | 128) != 0 {
+                None
+            } else {
+                Some(raw.BatteryFlag & 128 == 0)
+            };
+        let readable_battery = battery_present == Some(true);
+        let battery_percent = readable_battery
+            .then_some(raw.BatteryLifePercent)
+            .filter(|value| *value <= 100);
+        let battery_boolean = |flag| readable_battery.then_some(raw.BatteryFlag & flag != 0);
+        let lifetime = |seconds| {
+            (readable_battery && ac_online != Some(true) && seconds != u32::MAX).then_some(seconds)
+        };
+        Self {
+            ac_online,
+            battery_present,
+            battery_percent,
+            charging: battery_boolean(8),
+            battery_low: battery_boolean(2),
+            battery_critical: battery_boolean(4),
+            battery_saver: match raw.SystemStatusFlag {
+                0 => Some(false),
+                1 => Some(true),
+                _ => None,
+            },
+            remaining_seconds: lifetime(raw.BatteryLifeTime),
+            full_life_seconds: lifetime(raw.BatteryFullLifeTime),
+            raw_ac_line_status: raw.ACLineStatus,
+            raw_battery_flags: raw.BatteryFlag,
+            raw_battery_life_percent: raw.BatteryLifePercent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BatteryHardware {
+    pub device_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub pnp_device_id: Option<String>,
+    /// Win32_Battery has no manufacturer property. Keep unavailable rather than
+    /// treating a generic PnP driver provider or system OEM as battery vendor.
+    pub manufacturer: Option<String>,
+    pub estimated_charge_percent: Option<u8>,
+    pub design_capacity_mwh: Option<u64>,
+    pub full_charge_capacity_mwh: Option<u64>,
+    pub design_voltage_mv: Option<u64>,
+    pub chemistry: Option<String>,
+    pub battery_status_code: Option<u16>,
+    pub status: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct HardwareInventory {
     pub collected_at: SystemTime,
@@ -145,6 +233,9 @@ pub struct HardwareInventory {
     pub bios: Vec<BiosInfo>,
     pub processors: Vec<ProcessorInfo>,
     pub cpu_caches: Vec<CpuCacheInfo>,
+    pub cpu_topology: Option<CpuTopology>,
+    pub power_status: Option<SystemPowerStatus>,
+    pub batteries: Vec<BatteryHardware>,
     pub memory_modules: Vec<MemoryModuleInfo>,
     pub memory_slots_total: Option<u32>,
     pub memory_max_capacity_bytes: Option<u64>,
@@ -165,6 +256,9 @@ impl Default for HardwareInventory {
             bios: Vec::new(),
             processors: Vec::new(),
             cpu_caches: Vec::new(),
+            cpu_topology: None,
+            power_status: None,
+            batteries: Vec::new(),
             memory_modules: Vec::new(),
             memory_slots_total: None,
             memory_max_capacity_bytes: None,
@@ -180,8 +274,53 @@ impl Default for HardwareInventory {
 impl HardwareInventory {
     pub fn collect() -> Result<Self> {
         let started = Instant::now();
-        let connection = WMIConnection::new().context("无法连接 Windows 硬件信息服务")?;
         let mut inventory = Self::default();
+        inventory.cpu_topology = match CpuTopology::collect() {
+            Ok(topology) => {
+                inventory.issues.extend(
+                    topology
+                        .notes
+                        .iter()
+                        .map(|note| format!("CPU 拓扑：{note}")),
+                );
+                Some(topology)
+            }
+            Err(error) => {
+                inventory
+                    .issues
+                    .push(format!("CPU 拓扑读取失败：{error:#}"));
+                None
+            }
+        };
+        inventory.power_status = match SystemPowerStatus::collect() {
+            Ok(status) => Some(status),
+            Err(error) => {
+                inventory
+                    .issues
+                    .push(format!("系统电源状态读取失败：{error:#}"));
+                None
+            }
+        };
+        let connection = match WMIConnection::new() {
+            Ok(connection) => connection,
+            Err(error) => {
+                inventory.issues.push(format!(
+                    "无法连接 Windows 硬件信息服务：{error}；保留已采集的原生拓扑与电源信息"
+                ));
+                inventory.collection_duration_ms =
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+                inventory.collected_at = SystemTime::now();
+                return Ok(inventory);
+            }
+        };
+        if inventory
+            .power_status
+            .as_ref()
+            .and_then(|status| status.battery_present)
+            != Some(false)
+        {
+            inventory.batteries = collect_batteries(&connection, &mut inventory.issues);
+        }
 
         inventory.system = query(
             &connection,
@@ -355,6 +494,52 @@ fn query(
             issues.push(format!("{category}读取失败：{error}"));
             Vec::new()
         }
+    }
+}
+
+fn collect_batteries(connection: &WMIConnection, issues: &mut Vec<String>) -> Vec<BatteryHardware> {
+    // Only queried during the existing low-frequency hardware collection, and
+    // skipped when native power status explicitly reports no system battery.
+    // https://learn.microsoft.com/windows/win32/cimwin32prov/win32-battery
+    let batteries: Vec<_> = query(connection,
+        "SELECT DeviceID,Name,Description,PNPDeviceID,EstimatedChargeRemaining,DesignCapacity,FullChargeCapacity,DesignVoltage,Chemistry,BatteryStatus,Status FROM Win32_Battery",
+        "电池硬件", issues).iter().map(battery_from_row).collect();
+    if !batteries.is_empty() {
+        issues.push(
+            "Win32_Battery 不提供电池制造商字段；型号与电量保留系统来源，制造商不作推测".into(),
+        );
+    }
+    batteries
+}
+
+fn battery_from_row(row: &Row) -> BatteryHardware {
+    BatteryHardware {
+        device_id: string(row, "DeviceID").unwrap_or_default(),
+        name: string(row, "Name"),
+        description: string(row, "Description"),
+        pnp_device_id: string(row, "PNPDeviceID"),
+        manufacturer: None,
+        estimated_charge_percent: number(row, "EstimatedChargeRemaining")
+            .filter(|value| *value <= 100)
+            .map(|value| value as u8),
+        // The provider reports zero for unsupported capacity, rather than a
+        // useful zero-sized battery. Retain None; mWh and mV are documented units.
+        design_capacity_mwh: positive(row, "DesignCapacity")
+            .filter(|value| *value != u64::from(u32::MAX)),
+        full_charge_capacity_mwh: positive(row, "FullChargeCapacity")
+            .filter(|value| *value != u64::from(u32::MAX)),
+        design_voltage_mv: positive(row, "DesignVoltage"),
+        chemistry: number(row, "Chemistry").and_then(|value| match value {
+            3 => Some("铅酸".into()),
+            4 => Some("镍镉".into()),
+            5 => Some("镍氢".into()),
+            6 => Some("锂离子".into()),
+            7 => Some("锌空气".into()),
+            8 => Some("锂聚合物".into()),
+            _ => None,
+        }),
+        battery_status_code: number(row, "BatteryStatus").and_then(|value| value.try_into().ok()),
+        status: string(row, "Status"),
     }
 }
 
@@ -640,6 +825,76 @@ fn bus_type(value: u64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn power_sentinels_and_absent_batteries_do_not_become_zero_charge() {
+        let unknown = SystemPowerStatus::from_raw(&SYSTEM_POWER_STATUS {
+            ACLineStatus: 255,
+            BatteryFlag: 255,
+            BatteryLifePercent: 255,
+            SystemStatusFlag: 255,
+            BatteryLifeTime: u32::MAX,
+            BatteryFullLifeTime: u32::MAX,
+        });
+        assert_eq!(unknown.ac_online, None);
+        assert_eq!(unknown.battery_present, None);
+        assert_eq!(unknown.battery_percent, None);
+        assert_eq!(unknown.charging, None);
+        assert_eq!(unknown.battery_saver, None);
+        assert_eq!(unknown.remaining_seconds, None);
+        let absent = SystemPowerStatus::from_raw(&SYSTEM_POWER_STATUS {
+            ACLineStatus: 1,
+            BatteryFlag: 128,
+            BatteryLifePercent: 0,
+            SystemStatusFlag: 0,
+            BatteryLifeTime: 0,
+            BatteryFullLifeTime: 0,
+        });
+        assert_eq!(absent.battery_present, Some(false));
+        assert_eq!(absent.battery_percent, None);
+        assert_eq!(absent.charging, None);
+        assert_eq!(absent.remaining_seconds, None);
+        let discharged = SystemPowerStatus::from_raw(&SYSTEM_POWER_STATUS {
+            ACLineStatus: 0,
+            BatteryFlag: 4,
+            BatteryLifePercent: 0,
+            SystemStatusFlag: 1,
+            BatteryLifeTime: 0,
+            BatteryFullLifeTime: u32::MAX,
+        });
+        assert_eq!(discharged.battery_percent, Some(0));
+        assert_eq!(discharged.battery_critical, Some(true));
+        assert_eq!(discharged.remaining_seconds, Some(0));
+        assert_eq!(discharged.full_life_seconds, None);
+    }
+
+    #[test]
+    fn wmi_battery_units_missing_capacity_and_true_zero_charge_are_preserved() {
+        let row = [
+            (
+                "DeviceID".into(),
+                Variant::String("owned-fixture-battery".into()),
+            ),
+            ("EstimatedChargeRemaining".into(), Variant::UI2(0)),
+            ("DesignCapacity".into(), Variant::UI4(50_000)),
+            ("FullChargeCapacity".into(), Variant::UI4(0)),
+            ("DesignVoltage".into(), Variant::String("11400".into())),
+            ("Chemistry".into(), Variant::UI2(6)),
+        ]
+        .into_iter()
+        .collect();
+        let battery = battery_from_row(&row);
+        assert_eq!(battery.estimated_charge_percent, Some(0));
+        assert_eq!(battery.design_capacity_mwh, Some(50_000));
+        assert_eq!(battery.full_charge_capacity_mwh, None);
+        assert_eq!(battery.design_voltage_mv, Some(11_400));
+        assert_eq!(battery.manufacturer, None);
+        assert_eq!(battery.chemistry.as_deref(), Some("锂离子"));
+        let unknown = [("EstimatedChargeRemaining".into(), Variant::UI2(255))]
+            .into_iter()
+            .collect();
+        assert_eq!(battery_from_row(&unknown).estimated_charge_percent, None);
+    }
 
     #[test]
     fn wmi_integer_strings_do_not_lose_precision_or_fabricate_nulls() {

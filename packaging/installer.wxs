@@ -28,6 +28,8 @@
             <File Id="MainExecutable" Source="$(var.PayloadDir)/SystemMonitorX.exe" />
             <File Id="LicenseFile" Source="$(var.PayloadDir)/LICENSE" />
             <File Id="ReadmeFile" Source="$(var.PayloadDir)/README.md" />
+            <File Id="ReadmeChineseFile" Source="$(var.PayloadDir)/README.zh-CN.md" />
+            <File Id="InstallScriptFile" Source="$(var.PayloadDir)/Install-SystemMonitorX.ps1" />
             <Shortcut Id="LaunchShortcut" Directory="ApplicationMenuFolder" Name="SystemMonitorX"
                       Description="Windows system monitor and task manager"
                       Target="[#MainExecutable]" WorkingDirectory="INSTALLFOLDER"

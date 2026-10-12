@@ -36,7 +36,7 @@ try {
     $taskPayload = Join-Path $taskStage 'payload'
     New-Item -ItemType Directory -Path $taskPayload -Force | Out-Null
     Copy-Item -LiteralPath $taskExe, $taskUpdaterExe -Destination $taskPayload
-    Copy-Item -LiteralPath (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md') -Destination $taskPayload
+    Copy-Item -LiteralPath (Join-Path $taskRoot 'LICENSE'), (Join-Path $taskRoot 'README.md'), (Join-Path $taskRoot 'README.zh-CN.md'), (Join-Path $taskRoot 'scripts/Install-SystemMonitorX.ps1') -Destination $taskPayload
 
     # The application and detached update helper must both run from the payload.
     # Inspect the union of their imports before selecting one matching x64 CRT.

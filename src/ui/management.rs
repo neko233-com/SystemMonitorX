@@ -75,7 +75,7 @@ impl SystemMonitorApp {
         matching_session(&self.snapshot.as_ref()?.sessions, row).cloned()
     }
 
-    fn confirm_management(
+    pub(super) fn confirm_management(
         &mut self,
         title: &str,
         description: String,
